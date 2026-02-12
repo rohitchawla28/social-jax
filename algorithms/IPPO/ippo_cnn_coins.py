@@ -732,9 +732,9 @@ def tune(default_config):
 
 @hydra.main(version_base=None, config_path="config", config_name="ippo_cnn_coins")
 def main(config):
-    if config["TUNE"]:
-        tune(config)
-    else:
-        single_run(config)
+    # if config["TUNE"]:
+    #     tune(config)
+    # else:
+    single_run(config)
 if __name__ == "__main__":
     main()

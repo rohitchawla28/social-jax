@@ -6,8 +6,8 @@
 #SBATCH -n 1
 #SBATCH --cpus-per-task=2               # good for runtime orchestration?
 #SBATCH -t 00:05:00
-#SBATCH -o /scratch/11264/rohitchawla28/scr_reproduce_socialjax/slurm/logs/%j.cuda_test2.out
-#SBATCH -e /scratch/11264/rohitchawla28/scr_reproduce_socialjax/slurm/logs/%j.cuda_test2.err
+#SBATCH -o /scratch/11264/rohitchawla28/scr_reproduce_socialjax/slurm/logs/cuda_test2.%j.out
+#SBATCH -e /scratch/11264/rohitchawla28/scr_reproduce_socialjax/slurm/logs/cuda_test2.%j.err
 
 ### ======== This script is what ended up working for getting JAX to see the GPU on lonestar6 with CUDA 12.2 ========
 
