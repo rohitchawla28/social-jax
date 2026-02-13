@@ -1,0 +1,6 @@
+SLURM scripts in this directory are NOT run on TACC (at the moment), these are just for keeping synced to remote.
+- I house the scripts from a directory in $SCRATCH in /reproduce_socialjax/ in the TACC system.
+
+For running on mac to test (without a script):
+    1. Remember to "conda activate social-jax"
+    2. Remember to " export PYTHONPATH="$(pwd)/socialjax:$PYTHONPATH" "

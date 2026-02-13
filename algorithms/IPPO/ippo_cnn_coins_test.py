@@ -537,7 +537,7 @@ def single_run(config):
         tags=["IPPO", "FF"],
         config=config,
         mode=config["WANDB_MODE"],
-        name=f'ippo_cnn_coins'
+        name=f'ippo_cnn_coins_test'
     )
 
     rng = jax.random.PRNGKey(config["SEED"])
@@ -730,12 +730,12 @@ def tune(default_config):
     wandb.agent(sweep_id, wrapped_make_train, count=1000)
 
 
-@hydra.main(version_base=None, config_path="config", config_name="ippo_cnn_coins_test")
+@hydra.main(version_base=None, config_path="config", config_name="ippo_cnn_coins_test_mac")
 def main(config):
     # if config["TUNE"]:
     #     tune(config)
     # else:
-    print("Starting single run with config")
+    print("Starting single run mac!")
     single_run(config)
 if __name__ == "__main__":
     main()

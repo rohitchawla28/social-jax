@@ -38,7 +38,7 @@ export XDG_CACHE_HOME="$BASE/.cache"
 mkdir -p "$PIP_CACHE_DIR" "$XDG_CACHE_HOME"
 
 # install dependencies (also switched to conda run b/c was being flaky before)
-conda run -n SocialJax python -m pip install -r requirements.txt
+conda run -n SocialJax python -m pip install -r requirements_updated.txt
 
 # install CUDA12-enabled JAX (socialJax used CUDA11-enabled version)
 conda run -n SocialJax python -m pip install -U "jax[cuda12]"

@@ -1,3 +1,0 @@
-SLURM scripts in this directory are NOT run, these are just for keeping synced to remote.
-
-I house the scripts from a directory in $SCRATCH in /reproduce_socialjax/ in the TACC system.
