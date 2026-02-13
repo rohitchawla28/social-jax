@@ -736,6 +736,7 @@ def main(config):
     #     tune(config)
     # else:
     print("Starting single run mac!")
+    print(config)
     single_run(config)
 if __name__ == "__main__":
     main()

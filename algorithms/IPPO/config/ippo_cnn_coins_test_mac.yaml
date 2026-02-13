@@ -1,7 +1,7 @@
 "LR": 0.0005
-"NUM_ENVS": 1
-"NUM_STEPS": 8
-"TOTAL_TIMESTEPS": 16
+"NUM_ENVS": 4
+"NUM_STEPS": 32
+"TOTAL_TIMESTEPS": 256
 "UPDATE_EPOCHS": 1
 "NUM_MINIBATCHES": 1
 "GAMMA": 0.99
@@ -16,7 +16,7 @@
 "SHAPING_BEGIN": 1e6
 "ENV_KWARGS": 
   "num_agents" : 2
-  "num_inner_steps" : 10
+  "num_inner_steps" : 20
   "shared_rewards" : False # Attention: switch to False for individual rewards 
   "cnn" : True
   "jit" : True
