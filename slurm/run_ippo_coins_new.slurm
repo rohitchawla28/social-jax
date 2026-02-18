@@ -37,6 +37,7 @@ unset PYTHONPATH
 # make sure imports work (main fix after removing the hardcoded sys.path)
 # changed this back to what original repo says to do
 export PYTHONPATH="$REPO/socialjax"
+echo "PYTHONPATH set to: $PYTHONPATH"
 
 # WandB local files
 export WANDB_DIR="$BASE/wandb"
@@ -53,4 +54,4 @@ export HF_HOME="$BASE/hf"
 mkdir -p "$XDG_CACHE_HOME" "$HF_HOME"
 
 # run
-python "$REPO/algorithms/IPPO/ippo_cnn_coins.py"
+conda run -n SocialJax python "algorithms/IPPO/ippo_cnn_coins.py"
