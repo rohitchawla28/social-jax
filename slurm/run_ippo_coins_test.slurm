@@ -5,12 +5,10 @@
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH --cpus-per-task=2               # good for runtime orchestration?
-#SBATCH -t 00:30:00
+#SBATCH -t 00:10:00
 ##SBATCH --mail-type=all    # Send email at begin and end of job
 #SBATCH -o /scratch/11264/rohitchawla28/scr_reproduce_socialjax/slurm/logs/ippo_coins_test.%j.out
 #SBATCH -e /scratch/11264/rohitchawla28/scr_reproduce_socialjax/slurm/logs/ippo_coins_test.%j.err
-
-# ====== NOTE: this runs on the new repo social-jax
 
 set -euo pipefail
 

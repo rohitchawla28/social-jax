@@ -5,8 +5,7 @@
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH --cpus-per-task=2               # good for runtime orchestration?
-#SBATCH -t 08:00:00
-#SBATCH --mail-type=all    # Send email at begin and end of job
+#SBATCH -t 12:00:00
 #SBATCH -o /scratch/11264/rohitchawla28/scr_reproduce_socialjax/slurm/logs/ippo_coins.%j.out
 #SBATCH -e /scratch/11264/rohitchawla28/scr_reproduce_socialjax/slurm/logs/ippo_coins.%j.err
 
@@ -23,7 +22,7 @@ unset LD_LIBRARY_PATH
 # export CUDA_VISIBLE_DEVICES=0
 
 BASE="/scratch/11264/rohitchawla28/scr_reproduce_socialjax"
-REPO="$BASE/SocialJax"
+REPO="$BASE/social-jax"
 MINIFORGE="$BASE/miniforge3"
 
 # so that conda executable is found
@@ -36,7 +35,9 @@ cd "$REPO"
 unset PYTHONPATH
 
 # make sure imports work (main fix after removing the hardcoded sys.path)
+# changed this back to what original repo says to do
 export PYTHONPATH="$REPO"
+echo "PYTHONPATH set to: $PYTHONPATH"
 
 # WandB local files
 export WANDB_DIR="$BASE/wandb"
@@ -53,4 +54,4 @@ export HF_HOME="$BASE/hf"
 mkdir -p "$XDG_CACHE_HOME" "$HF_HOME"
 
 # run
-python "$REPO/algorithms/IPPO/ippo_cnn_coins.py"
+conda run -n SocialJax python "algorithms/IPPO/ippo_cnn_coins.py"

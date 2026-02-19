@@ -3,6 +3,7 @@ Based on PureJaxRL & jaxmarl Implementation of PPO
 """
 import sys
 # sys.path.append('/home/shuqing/SocialJax') # ***CHECK
+# instead each session on macbook: "export PYTHONPATH=/Users/rohitchawla/Library/Mobile\ Documents/com~apple~CloudDocs/Data/Personal/Career/MARL_FlowMatching/social-jax"
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
