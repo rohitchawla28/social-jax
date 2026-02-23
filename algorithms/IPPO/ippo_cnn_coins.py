@@ -1,8 +1,9 @@
 """ 
 Based on PureJaxRL & jaxmarl Implementation of PPO
 """
+
 import sys
-# sys.path.append('/home/shuqing/SocialJax') # ***CHECK
+# sys.path.append('/home/shuqing/SocialJax')
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
@@ -13,7 +14,7 @@ from typing import Sequence, NamedTuple, Any
 from flax.training.train_state import TrainState
 # from flax.training import checkpoints
 import distrax
-from gymnax.wrappers.purerl import LogWrapper, FlattenObservationWrapper # ***CHECK
+from gymnax.wrappers.purerl import LogWrapper, FlattenObservationWrapper
 import socialjax
 from socialjax.wrappers.baselines import LogWrapper, SVOLogWrapper
 import hydra
@@ -181,7 +182,7 @@ def make_train(config):
         config["NUM_ACTORS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     )
 
-    env = LogWrapper(env, replace_info=False) # ***CHECK
+    env = LogWrapper(env, replace_info=False)
 
     rew_shaping_anneal = optax.linear_schedule(
         init_value=0.,
@@ -250,6 +251,7 @@ def make_train(config):
         # TRAIN LOOP
         def _update_step(runner_state, unused):
             # COLLECT TRAJECTORIES
+            # _env_step runs 1 step and collects transition data 
             def _env_step(runner_state, unused):
                 train_state, env_state, last_obs, update_step, rng = runner_state
 
@@ -328,6 +330,7 @@ def make_train(config):
                 runner_state = (train_state, env_state, obsv, update_step, rng)
                 return runner_state, transition
 
+            # collect trajectories for 1 rollout batch (NUM_STEPS=1000)
             runner_state, traj_batch = jax.lax.scan(
                 _env_step, runner_state, None, config["NUM_STEPS"]
             )
@@ -385,6 +388,7 @@ def make_train(config):
             # UPDATE NETWORK
             def _update_epoch(update_state, unused, i):
                 def _update_minbatch(train_state, batch_info, network_used):
+                    # minibatches is passed in as batch_info param?
                     traj_batch, advantages, targets = batch_info
 
                     def _loss_fn(params, traj_batch, gae, targets, network_used):
@@ -434,10 +438,15 @@ def make_train(config):
 
                 train_state, traj_batch, advantages, targets, rng = update_state
                 rng, _rng = jax.random.split(rng)
+                # MINIBATCH_SIZE == 1024
                 batch_size = config["MINIBATCH_SIZE"] * config["NUM_MINIBATCHES"]
+                
+                # batch_size (for 1 rollout batch) == 1000 * 512
                 assert (
                     batch_size == config["NUM_STEPS"] * config["NUM_ACTORS"]
                 ), "batch size must be equal to number of steps * number of actors"
+
+                # shuffle the batch before splitting into minibatches
                 permutation = jax.random.permutation(_rng, batch_size)
                 batch = (traj_batch, advantages, targets)
                 batch = jax.tree_util.tree_map(
@@ -453,12 +462,16 @@ def make_train(config):
                 shuffled_batch = jax.tree_util.tree_map(
                     lambda x: jnp.take(x, permutation, axis=0), batch
                 )
+
+                # reshape into minibatches
                 minibatches = jax.tree_util.tree_map(
                     lambda x: jnp.reshape(
                         x, [config["NUM_MINIBATCHES"], -1] + list(x.shape[1:])
                     ),
                     shuffled_batch,
                 )
+
+                # 1 epoch update: run minibatches through the network and update parameters
                 if config["PARAMETER_SHARING"]:
                     train_state, total_loss = jax.lax.scan(
                         lambda state, batch_info: _update_minbatch(state, batch_info, network), train_state, minibatches
@@ -473,6 +486,8 @@ def make_train(config):
             
             if config["PARAMETER_SHARING"]:
                 update_state = (train_state, traj_batch, advantages, targets, rng)
+
+                # run multiple epochs on same rollout batch
                 update_state, loss_info = jax.lax.scan(
                     lambda state, unused: _update_epoch(state, unused, 0), update_state, None, config["UPDATE_EPOCHS"]
                 )
@@ -498,6 +513,8 @@ def make_train(config):
                 wandb.log(metric)
 
             update_step = update_step + 1
+
+            # write metrics to wandb after every update step / rollout
             metric = jax.tree_util.tree_map(lambda x: x.mean(), metric)
             if config["PARAMETER_SHARING"]:
                 metric["update_step"] = update_step
@@ -519,9 +536,9 @@ def make_train(config):
 
         rng, _rng = jax.random.split(rng)
         runner_state = (train_state, env_state, obsv, 0, _rng)
-        runner_state, metric = jax.lax.scan(
-            _update_step, runner_state, None, config["NUM_UPDATES"]
-        )
+
+        # run the full _update_step() for ~3906 rollouts
+        runner_state, metric = jax.lax.scan(_update_step, runner_state, None, config["NUM_UPDATES"])
         return {"runner_state": runner_state, "metrics": metric}
 
     return train
@@ -534,7 +551,7 @@ def single_run(config):
     wandb.init(
         entity=config["ENTITY"],
         project=config["PROJECT"],
-        tags=["IPPO", "FF"],
+        tags=["IPPO"],
         config=config,
         mode=config["WANDB_MODE"],
         name=f'ippo_cnn_coins'
@@ -548,18 +565,18 @@ def single_run(config):
     print("** Saving Results **")
     filename = f'{config["ENV_NAME"]}_seed{config["SEED"]}'
     train_state = jax.tree_util.tree_map(lambda x: x[0], out["runner_state"][0])
-    save_path = f"./checkpoints/individual/{filename}.pkl"                  # ***CHECK
+    save_path = f"./checkpoints/individual/{filename}.pkl"
     if config["PARAMETER_SHARING"]:
-        save_path = f"./checkpoints/individual/{filename}.pkl"              # ***CHECK
+        save_path = f"./checkpoints/individual/{filename}.pkl"
         save_params(train_state, save_path)
         params = load_params(save_path)
     else:
         params = []
         for i in range(config['ENV_KWARGS']['num_agents']):
-            save_path = f"./checkpoints/individual/{filename}_{i}.pkl"         # ***CHECK
+            save_path = f"./checkpoints/individual/{filename}_{i}.pkl"
             save_params(train_state[i], save_path)
             params.append(load_params(save_path))
-    evaluate(params, socialjax.make(config["ENV_NAME"], **config["ENV_KWARGS"]), save_path, config)     # ***CHECK
+    evaluate(params, socialjax.make(config["ENV_NAME"], **config["ENV_KWARGS"]), save_path, config)
     # state_seq = get_rollout(train_state.params, config)
     # viz = OvercookedVisualizer()
     # agent_view_size is hardcoded as it determines the padding around the layout.
@@ -587,9 +604,9 @@ def evaluate(params, env, save_path, config):
     pics = []
     img = env.render(state)
     pics.append(img)
-    root_dir = f"evaluation/coins"              # ***CHECK
-    path = Path(root_dir + "/state_pics")       # ***CHECK
-    path.mkdir(parents=True, exist_ok=True)     # ***CHECK
+    root_dir = f"evaluation/coins"
+    path = Path(root_dir + "/state_pics")
+    path.mkdir(parents=True, exist_ok=True)
 
     for o_t in range(config["GIF_NUM_FRAMES"]):
         # 获取所有智能体的观察
@@ -643,7 +660,7 @@ def evaluate(params, env, save_path, config):
     print(f"Saving Episode GIF")
     pics = [Image.fromarray(np.array(img)) for img in pics]
     n_agents = len(env.agents)
-    gif_path = f"{root_dir}/{n_agents}-agents_seed-{config['SEED']}_frames-{o_t + 1}.gif"       # ***CHECK
+    gif_path = f"{root_dir}/{n_agents}-agents_seed-{config['SEED']}_frames-{o_t + 1}.gif"
     pics[0].save(
         gif_path,
         format="GIF",
