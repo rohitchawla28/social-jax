@@ -89,10 +89,8 @@ class LogWrapper(JaxMARLWrapper):
             env_state=env_state,
             episode_returns=new_episode_return * (1 - ep_done),
             episode_lengths=new_episode_length * (1 - ep_done),
-            returned_episode_returns=state.returned_episode_returns * (1 - ep_done)
-            + new_episode_return * ep_done,
-            returned_episode_lengths=state.returned_episode_lengths * (1 - ep_done)
-            + new_episode_length * ep_done,
+            returned_episode_returns=state.returned_episode_returns * (1 - ep_done) + new_episode_return * ep_done,
+            returned_episode_lengths=state.returned_episode_lengths * (1 - ep_done) + new_episode_length * ep_done,
         )
         if self.replace_info:
             info = {}
