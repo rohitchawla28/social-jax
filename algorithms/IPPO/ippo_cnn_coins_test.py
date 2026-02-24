@@ -257,11 +257,7 @@ def make_train(config):
 
                 # SELECT ACTION
                 rng, _rng = jax.random.split(rng)
-
-
-                
                 # obs_batch = jnp.stack([last_obs[a] for a in env.agents]).reshape(-1, *env.observation_space().shape)
-                
                 if config["PARAMETER_SHARING"]:
                     obs_batch = jnp.transpose(last_obs,(1,0,2,3,4)).reshape(-1, *(env.observation_space()[0]).shape)
                     print("input_obs_shape", obs_batch.shape)
@@ -303,7 +299,20 @@ def make_train(config):
 
                 
                 if config["PARAMETER_SHARING"]:
-                    info = jax.tree_util.tree_map(lambda x: x.reshape((config["NUM_ACTORS"])), info)
+                    # I'm keeping previous env-major flattening for reference - (NUM_ENVS, num_agents) -> (NUM_ACTORS,)
+                    # This can misalign with obs,reward,done actor indexing when PARAMETER_SHARING=True
+                        # info = jax.tree_util.tree_map(lambda x: x.reshape((config["NUM_ACTORS"])), info)
+
+                    # Correct actor alignment is below:
+                        # Obs_batch is built with transpose(last_obs, (1, 0, ...)).reshape(-1, ...) 
+                        # so actor axis is agent-major: actor = agent_id * NUM_ENVS + env_id.
+                        
+                        # Vmapped env.step returns per-key info as (NUM_ENVS, num_agents) which is env-major.
+                        # Transpose to (num_agents, NUM_ENVS) before flattening so info matches obs/reward/done.
+                    info = jax.tree_util.tree_map(
+                        lambda x: jnp.transpose(x, (1, 0)).reshape((config["NUM_ACTORS"],)),
+                        info,
+                    )
                     transition = Transition(
                         batchify_dict(done, env.agents, config["NUM_ACTORS"]).squeeze(),
                         action,
@@ -330,10 +339,28 @@ def make_train(config):
                 runner_state = (train_state, env_state, obsv, update_step, rng)
                 return runner_state, transition
 
-            # collect trajectories for 1 rollout batch (NUM_STEPS=1000)
+            # collect trajectories for 1 rollout batch/update_step (which has NUM_STEPS=1000 in it)
             runner_state, traj_batch = jax.lax.scan(
                 _env_step, runner_state, None, config["NUM_STEPS"]
             )
+
+            # ===== some debugging prints =====
+
+            # do_print = (runner_state[3] == 0)
+            # jax.lax.cond(
+            #     do_print,
+            #     lambda _: jax.debug.print(
+            #         "traj_batch: {t}, class: {cl}, type: {ty}\n\n",
+            #         t=traj_batch,
+            #         ty=type(traj_batch)
+            #     ),
+            #     lambda _: None,
+            #     operand=None,
+            # )
+            
+            # lambda _: jax.debug.print(
+            #         "info keys: {}", list(traj_batch.info.keys())
+            #     ),
 
             # CALCULATE ADVANTAGE
             train_state, env_state, last_obs, update_step, rng = runner_state
@@ -426,15 +453,34 @@ def make_train(config):
                             + config["VF_COEF"] * value_loss
                             - config["ENT_COEF"] * entropy
                         )
-                        return total_loss, (value_loss, loss_actor, entropy)
 
+                        # log critic prediction value as well for analyzing training dynamics
+                        value_mean = value.mean()
+
+                        # returned as pair for jax.value_and_grad() function,
+                        # where 1st elem (total_loss) is main scalar for gradient calculation
+                        # and 2nd elem is auxiliary data
+                        return total_loss, (value_loss, loss_actor, entropy, value_mean)
 
                     grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
-                    total_loss, grads = grad_fn(
-                            train_state.params, traj_batch, advantages, targets, network_used
-                        )
+
+                    # changed to actually extract the auxiliary metrics along w/ total_loss
+                    (total_loss, (value_loss, loss_actor, entropy, value_mean)), grads = grad_fn(
+                        train_state.params, traj_batch, advantages, targets, network_used
+                    )
+
+                    # calculate gradient norm for additional training metric
+                    grad_norm = optax.global_norm(grads)
+
                     train_state = train_state.apply_gradients(grads=grads)
-                    return train_state, total_loss
+                    train_metrics = {
+                        "train/total_loss": total_loss,
+                        "train/value_loss": value_loss,
+                        "train/value_mean": value_mean,
+                        "train/entropy": entropy,
+                        "train/grad_norm": grad_norm,
+                    }
+                    return train_state, train_metrics
 
                 train_state, traj_batch, advantages, targets, rng = update_state
                 rng, _rng = jax.random.split(rng)
@@ -473,16 +519,16 @@ def make_train(config):
 
                 # 1 epoch update: run minibatches through the network and update parameters
                 if config["PARAMETER_SHARING"]:
-                    train_state, total_loss = jax.lax.scan(
+                    train_state, train_metrics = jax.lax.scan(
                         lambda state, batch_info: _update_minbatch(state, batch_info, network), train_state, minibatches
                     )
                 else:
-                    train_state, total_loss = jax.lax.scan(
+                    train_state, train_metrics = jax.lax.scan(
                         lambda state, batch_info: _update_minbatch(state, batch_info, network[i]), train_state, minibatches
                     )
 
                 update_state = (train_state, traj_batch, advantages, targets, rng)
-                return update_state, total_loss
+                return update_state, train_metrics
             
             if config["PARAMETER_SHARING"]:
                 update_state = (train_state, traj_batch, advantages, targets, rng)
@@ -493,6 +539,11 @@ def make_train(config):
                 )
                 train_state = update_state[0]
                 metric = traj_batch.info
+
+                # avg the training metrics over epochs and minibatches to get 1 scalar per metric each update_step
+                # this matches their logging granularity
+                train_metric = jax.tree_util.tree_map(lambda x: x.mean(), loss_info)
+                metric = {**metric, **train_metric}
                 rng = update_state[-1]
             else:
                 update_state_dict = []
@@ -505,7 +556,8 @@ def make_train(config):
                     update_state_dict.append(update_state)
                     train_state[i] = update_state[0]
                     metric_i = traj_batch[i].info
-                    metric_i['loss'] = loss_info[0]
+                    train_metric_i = jax.tree_util.tree_map(lambda x: x.mean(), loss_info)
+                    metric_i = {**metric_i, **train_metric_i}
                     metric.append(metric_i)
                     rng = update_state[-1]
                 
@@ -535,6 +587,7 @@ def make_train(config):
             return runner_state, metric
 
         rng, _rng = jax.random.split(rng)
+        # init runner_state
         runner_state = (train_state, env_state, obsv, 0, _rng)
 
         # run the full _update_step() for ~3906 rollouts
@@ -552,6 +605,7 @@ def single_run(config):
         entity=config["ENTITY"],
         project=config["PROJECT"],
         tags=["IPPO"],
+        group=config["WANDB_GROUP"],
         config=config,
         mode=config["WANDB_MODE"],
         name=f'ippo_cnn_coins_test_mac'
@@ -713,7 +767,10 @@ def tune(default_config):
     def wrapped_make_train():
 
 
-        wandb.init(project=default_config["PROJECT"])
+        wandb.init(
+            project=default_config["PROJECT"],
+            group=default_config["WANDB_GROUP"],
+        )
         config = copy.deepcopy(default_config)
         # only overwrite the single nested key we're sweeping
         for k, v in dict(wandb.config).items():
@@ -752,7 +809,7 @@ def main(config):
     # if config["TUNE"]:
     #     tune(config)
     # else:
-    print(f"Starting single run mac test with config:\n\n {config}")
+    print(f"Starting single run mac test with config:\n\n {config}\n\n")
     single_run(config)
 if __name__ == "__main__":
     main()
