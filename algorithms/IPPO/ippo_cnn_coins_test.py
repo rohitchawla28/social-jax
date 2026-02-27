@@ -260,7 +260,7 @@ def make_train(config):
                 # obs_batch = jnp.stack([last_obs[a] for a in env.agents]).reshape(-1, *env.observation_space().shape)
                 if config["PARAMETER_SHARING"]:
                     obs_batch = jnp.transpose(last_obs,(1,0,2,3,4)).reshape(-1, *(env.observation_space()[0]).shape)
-                    print("input_obs_shape", obs_batch.shape)
+                    # print("input_obs_shape", obs_batch.shape)
                     pi, value = network.apply(train_state.params, obs_batch)
                     action = pi.sample(seed=_rng)
                     log_prob = pi.log_prob(action)
@@ -273,7 +273,7 @@ def make_train(config):
                     log_prob = []
                     value = []
                     for i in range(env.num_agents):
-                        print("input_obs_shape", obs_batch[i].shape)
+                        # print("input_obs_shape", obs_batch[i].shape)
                         pi, value_i = network[i].apply(train_state[i].params, obs_batch[i])
                         action = pi.sample(seed=_rng)
                         log_prob.append(pi.log_prob(action))
@@ -357,10 +357,6 @@ def make_train(config):
             #     lambda _: None,
             #     operand=None,
             # )
-            
-            # lambda _: jax.debug.print(
-            #         "info keys: {}", list(traj_batch.info.keys())
-            #     ),
 
             # CALCULATE ADVANTAGE
             train_state, env_state, last_obs, update_step, rng = runner_state
@@ -571,13 +567,11 @@ def make_train(config):
             if config["PARAMETER_SHARING"]:
                 metric["update_step"] = update_step
                 metric["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
-                # jax.debug.callback(callback, metric)
             else:
                 for i in range(env.num_agents):
                     metric[i]["update_step"] = update_step
                     metric[i]["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
                 metric = metric[0]
-                # jax.debug.callback(callback, metric)
             metric["update_step"] = update_step
             metric["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
             metric["eat_own_coins"] = metric["eat_own_coins"] * config["ENV_KWARGS"]["num_inner_steps"]

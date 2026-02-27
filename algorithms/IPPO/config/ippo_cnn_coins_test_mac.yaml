@@ -28,7 +28,7 @@
 "SHAPING_BEGIN": 1e6
 "ENV_KWARGS": 
   "num_agents" : 2
-  "num_inner_steps" : 20
+  "num_inner_steps" : 16 # NOTE: MATCH TO NUM_STEPS
   "shared_rewards" : False # Attention: switch to False for individual rewards 
   "cnn" : True
   "jit" : True
