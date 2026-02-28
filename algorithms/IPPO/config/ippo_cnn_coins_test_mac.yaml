@@ -46,7 +46,7 @@
 "True": True
 
 "REWARD": "individual" # individual; common
-"GIF_NUM_FRAMES": 10
+"GIF_NUM_FRAMES": 50
 "PARAMETER_SHARING": True
 
 # WandB Params

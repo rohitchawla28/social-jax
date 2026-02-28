@@ -601,11 +601,22 @@ def make_train(config):
                     # fairness (variance) by getting variance between agents, then avg across envs
                     mean_ep_returns_variance = ep_returns_agent_env.var(axis=0).mean()      # scalar
 
+                    # fairness (pairwise absolute difference)
+                    mean_ep_pairwise_absdiff = jnp.abs(ep_returns_agent_env[0] - ep_returns_agent_env[1]).mean()
+
+                        # General case for num_agents > 2
+                            # diff = jnp.abs(ep_returns_agent_env[:, None, :] - ep_returns_agent_env[None, :, :])  # (A, A, E)
+                            # # take only upper triangle pairs i<j
+                            # A = ep_ret_agent_env.shape[0]
+                            # mask = jnp.triu(jnp.ones((A, A), dtype=bool), k=1)[:, :, None]               # (A, A, 1)
+                            # pairwise_absdiff_mean = diff[mask].mean()                                    # scalar
+
                     for i in range(env.num_agents):
                         out[f"rollout/raw_ep_return_agent{i}"] = mean_ep_return_per_agent[i]
 
                     out["rollout/raw_ep_return_team"] = mean_ep_return_team
                     out["rollout/raw_ep_returns_variance"] = mean_ep_returns_variance
+                    out["rollout/raw_ep_pairwise_absdiff"] = mean_ep_pairwise_absdiff
 
                 for k, v in m.items():
                     if k == "raw_reward_individual":
@@ -709,6 +720,9 @@ def evaluate(params, env, save_path, config):
     rng, _rng = jax.random.split(rng)
     obs, state = env.reset(_rng)
     done = False
+
+    raw_ep_return_agents = jnp.zeros((env.num_agents,), dtype=jnp.float32)
+    # opt_ep_ret_team = 0.0  optional training signal team return
     
     pics = []
     img = env.render(state)
@@ -747,6 +761,14 @@ def evaluate(params, env, save_path, config):
         rng, _rng = jax.random.split(rng)
         obs, state, reward, done, info = env.step(_rng, state, [v.item() for v in env_act.values()])
         done = done["__all__"]
+
+        # ==== EVAL METRICS ===
+        # raw per-agent reward (logging only)
+        raw_step = info["raw_reward_individual"]  # shape (n_agents,)
+        raw_ep_return_agents = raw_ep_return_agents + raw_step
+
+        # optional - actual training team reward (what the algo optimizes)
+            # opt_ep_ret_team += sum(reward.values())
         
         # 记录结果
         # episode_reward += sum(reward.values())
@@ -764,6 +786,36 @@ def evaluate(params, env, save_path, config):
             # print(f'State: {state.agent_locs}')
             # print(f'State: {state.claimed_indicator_time_matrix}')
             print("###################")
+    
+    print(f"type of raw_ep_return_agents: {type(raw_ep_return_agents)}")
+
+    # ====== CALCULATE / LOG EVAL METRICS =======
+    raw_ep_return_team = raw_ep_return_agents.sum()
+    print(f"type of raw_ep_return_team: {type(raw_ep_return_team)}")
+
+    # fairness variance across agents (single env episode)
+    raw_variance = jnp.var(raw_ep_return_agents)
+
+    # pairwise abs diff
+    if env.num_agents == 2:
+        raw_ep_pair_absdiff = jnp.abs(raw_ep_return_agents[0] - raw_ep_return_agents[1])
+    # for num_agents > 2
+        # else:
+        #     diff = jnp.abs(raw_ep_return_agents[:, None] - raw_ep_return_agents[None, :])  # (A, A)
+        #     mask = jnp.triu(jnp.ones((env.num_agents, env.num_agents), dtype=bool), k=1)
+        #     fair_pair_absdiff = diff[mask].mean()
+
+    eval_metrics = {}
+    for i in range(env.num_agents):
+        eval_metrics[f"eval/raw_ep_return_agent{i}"] = float(raw_ep_return_agents[i])
+    eval_metrics["eval/raw_ep_return_team"] = float(raw_ep_return_team)
+    eval_metrics["eval/raw_ep_return_variance"] = float(raw_variance)
+    eval_metrics["eval/raw_ep_pairwise_absdiff"] = float(raw_ep_pair_absdiff)
+    # optional -  "eval/opt_ep_return_team": float(opt_ep_ret_team)
+
+    print(f"Eval Metrics: {eval_metrics}")
+
+    wandb.log(eval_metrics)
     
     # 保存GIF
     print(f"Saving Episode GIF")
