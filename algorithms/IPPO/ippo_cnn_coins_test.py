@@ -293,6 +293,13 @@ def make_train(config):
                     env.step, in_axes=(0, 0, 0)
                 )(rng_step, env_state, env_act)
 
+                # info HERE is env-major
+                # info shapes x16 for T: {  'eat_own_coins': (Array(4, dtype=int32), Array(2, dtype=int32)), 
+                                # 'raw_reward_individual': (Array(4, dtype=int32), Array(2, dtype=int32)), 
+                                # 'returned_episode': (Array(4, dtype=int32), Array(2, dtype=int32)), 
+                                # 'returned_episode_lengths': (Array(4, dtype=int32), Array(2, dtype=int32)), 
+                                # 'returned_episode_returns': (Array(4, dtype=int32), Array(2, dtype=int32))}
+
                 # current_timestep = update_step*config["NUM_STEPS"]*config["NUM_ENVS"]
                 # shaped_reward = compute_grouped_rewards(reward)
                 # reward = jax.tree_util.tree_map(lambda x,y: x*rew_shaping_anneal_org(current_timestep)+y*rew_shaping_anneal(current_timestep), reward, shaped_reward)
@@ -309,6 +316,7 @@ def make_train(config):
                         
                         # Vmapped env.step returns per-key info as (NUM_ENVS, num_agents) which is env-major.
                         # Transpose to (num_agents, NUM_ENVS) before flattening so info matches obs/reward/done.
+                        # flattened info is then env0 agent0, env1 agent0, ..., envN agent0, env0 agent1, ..., envN agent1
                     info = jax.tree_util.tree_map(
                         lambda x: jnp.transpose(x, (1, 0)).reshape((config["NUM_ACTORS"],)),
                         info,
@@ -562,8 +570,61 @@ def make_train(config):
 
             update_step = update_step + 1
 
-            # write metrics to wandb after every update step / rollout
-            metric = jax.tree_util.tree_map(lambda x: x.mean(), metric)
+            # REMOVED bc avg across all timesteps wasnt good
+                # write metrics to wandb after every update step / rollout
+                # metric = jax.tree_util.tree_map(lambda x: x.mean(), metric)
+            
+            # NOTE: some fields (ex: returned_episode_returns) are episodic and only become non-zero at episode end
+            def _reduce_metric_dict(m):
+                """Reduce per-update metrics.
+                - For fixed T CoinGame (1 episode per rollout): use last timestep for episodic signals
+                - For raw per-step rewards: sum over time to get episode returns
+                """
+                episode_keys = ("returned_episode_returns", "returned_episode_lengths", "returned_episode")
+                out = {}
+                if "raw_reward_individual" in m:
+                    raw = m["raw_reward_individual"]                                        # shape=(T, NUM_ACTORS) after flatten
+
+                    # unflatten to (T, num_agents, NUM_ENVS) assuming agent-major flattening
+                    if raw.ndim == 2:
+                        raw = raw.reshape((raw.shape[0], env.num_agents, config["NUM_ENVS"]))
+
+                    # episode return per agent per env
+                    ep_returns_agent_env = raw.sum(axis=0)                                  # (num_agents, NUM_ENVS)
+
+                    # avg across envs
+                    mean_ep_return_per_agent = ep_returns_agent_env.mean(axis=1)            # (num_agents,)
+
+                    # sum across agents to get team return, then avg across envs
+                    mean_ep_return_team = ep_returns_agent_env.sum(axis=0).mean()            # scalar
+
+                    # fairness (variance) by getting variance between agents, then avg across envs
+                    mean_ep_returns_variance = ep_returns_agent_env.var(axis=0).mean()      # scalar
+
+                    for i in range(env.num_agents):
+                        out[f"rollout/raw_ep_return_agent{i}"] = mean_ep_return_per_agent[i]
+
+                    out["rollout/raw_ep_return_team"] = mean_ep_return_team
+                    out["rollout/raw_ep_returns_variance"] = mean_ep_returns_variance
+
+                for k, v in m.items():
+                    if k == "raw_reward_individual":
+                        # don't want to log per-step raw rewards
+                        continue
+                    
+                    # v has shape=(T, NUM_ACTORS)
+                    if k in episode_keys:
+                        # since one episode per rollout, last timestep contains episode return value
+                        out[k] = v[-1].mean()                    # v[-1].shape=(NUM_ACTORS,), then avg across actors for scalar
+                    else:
+                        out[k] = v.mean()
+                return out
+
+            if config["PARAMETER_SHARING"]:
+                metric = _reduce_metric_dict(metric)
+            else:
+                metric = [_reduce_metric_dict(m_i) for m_i in metric]
+
             if config["PARAMETER_SHARING"]:
                 metric["update_step"] = update_step
                 metric["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]

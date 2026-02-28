@@ -915,6 +915,13 @@ class CoinGame(MultiAgentEnv):
             state = state.replace(agent_locs=new_locs)
 
 
+            # this is actual per-agent reward from the env, BEFORE shared/shaping/SVO/etc, used only for logging
+            # different from the actual optimization target
+
+            # NOTE: raw_reward_individual doesn't include the scaling they have (rewards * num_agents)
+            # TODO: maybe see why they had so much redundancy in the reward calculation in each case, were there weird errors?
+            raw_reward_individual = rewards.squeeze() # shape=(num_agents,1)
+
             if self.shared_rewards:
                 rewards = jnp.zeros((2, 1))
                 rewards = rewards.at[0, 0].set(red_reward[0])
@@ -979,6 +986,10 @@ class CoinGame(MultiAgentEnv):
             eat_own_coins = eat_own_coins.at[0, 0].set(red_reward[0])
             eat_own_coins = eat_own_coins.at[1, 0].set(green_reward[0])
             info["eat_own_coins"] = eat_own_coins.squeeze() * self.num_agents
+
+            # this is actual per-agent reward from the env, BEFORE shared/shaping/SVO/etc, used only for logging/fairness metrics
+            # different from the actual optimization target
+            info["raw_reward_individual"] = raw_reward_individual
 
             # if self.shared_rewards:
             #     rewards = jnp.zeros((2, 1))
