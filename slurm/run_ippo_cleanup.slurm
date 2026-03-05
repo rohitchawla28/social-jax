@@ -5,7 +5,7 @@
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH --cpus-per-task=2               # good for runtime orchestration?
-#SBATCH -t 14:00:00
+#SBATCH -t 18:00:00
 #SBATCH -o /scratch/11264/rohitchawla28/scr_reproduce_socialjax/slurm/logs/ippo_indiv_cleanup.%j.out
 #SBATCH -e /scratch/11264/rohitchawla28/scr_reproduce_socialjax/slurm/logs/ippo_indiv_cleanup.%j.err
 
@@ -56,4 +56,3 @@ mkdir -p "$XDG_CACHE_HOME" "$HF_HOME"
 # run
 conda run -n SocialJax python "algorithms/IPPO/ippo_cnn_cleanup.py" SEED=30
 conda run -n SocialJax python "algorithms/IPPO/ippo_cnn_cleanup.py" SEED=31
-conda run -n SocialJax python "algorithms/IPPO/ippo_cnn_cleanup.py" SEED=32
