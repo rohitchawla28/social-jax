@@ -1,21 +1,31 @@
-"LR": 0.0005
+# ==================== CONFIG TWEAKING NOTES ===========================
+    # NOTE: match NUM_STEPS w/ num_inner_steps for episode length
+    # NOTE: match GIF_NUM_FRAMES w/ num_inner_steps and NUM_STEPS if want eval to be full episode length
+    # NOTE: run # rollouts (NUM_UPDATES) > 10, bc with new chunk refactor, it will still run 10 chunks of size 1 if NUM_UPDATES < 10
 
-# ====== tiny test
-# rollouts or update_steps = 2
+
+# ====== tiny test (# rollouts = 2)
 # "NUM_ENVS": 2
 # "NUM_STEPS": 8
 # "TOTAL_TIMESTEPS": 32
 # "UPDATE_EPOCHS": 1
 # "NUM_MINIBATCHES": 1
 
-# ====== small test
-# rollouts or update_steps = 16
-"NUM_ENVS": 4
-"NUM_STEPS": 16
-"TOTAL_TIMESTEPS": 1024
-"UPDATE_EPOCHS": 2
-"NUM_MINIBATCHES": 2
+# ====== small test (# rollouts = 16)
+# "NUM_ENVS": 4
+# "NUM_STEPS": 16
+# "TOTAL_TIMESTEPS": 1024
+# "UPDATE_EPOCHS": 2
+# "NUM_MINIBATCHES": 2
 
+# ====== small test 2 (# rollouts = 32)
+"NUM_ENVS": 4
+"NUM_STEPS": 128
+"TOTAL_TIMESTEPS": 16384
+"UPDATE_EPOCHS": 4
+"NUM_MINIBATCHES": 4
+
+"LR": 0.0005
 "GAMMA": 0.99
 "GAE_LAMBDA": 0.95
 "CLIP_EPS": 0.2
@@ -28,7 +38,7 @@
 "SHAPING_BEGIN": 1e6
 "ENV_KWARGS": 
   "num_agents" : 2
-  "num_inner_steps" : 16 # NOTE: MATCH TO NUM_STEPS
+  "num_inner_steps" : 128 # NOTE: MATCH TO NUM_STEPS
   "shared_rewards" : False # Attention: switch to False for individual rewards 
   "cnn" : True
   "jit" : True
@@ -40,7 +50,7 @@
 "True": True
 
 "REWARD": "individual" # individual; common
-"GIF_NUM_FRAMES": 10
+"GIF_NUM_FRAMES": 70
 "PARAMETER_SHARING": True
 
 # WandB Params

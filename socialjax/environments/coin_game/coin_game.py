@@ -915,6 +915,13 @@ class CoinGame(MultiAgentEnv):
             state = state.replace(agent_locs=new_locs)
 
 
+            # this is actual per-agent reward from the env, BEFORE shared/shaping/SVO/etc, used only for logging
+            # different from the actual optimization target
+
+            # NOTE: raw_reward_individual doesn't include the scaling they have (rewards * num_agents)
+            # TODO: maybe see why they had so much redundancy in the reward calculation in each case, were there weird errors?
+            raw_reward_individual = rewards.squeeze() # shape=(num_agents,1)
+
             if self.shared_rewards:
                 rewards = jnp.zeros((2, 1))
                 rewards = rewards.at[0, 0].set(red_reward[0])
@@ -980,6 +987,10 @@ class CoinGame(MultiAgentEnv):
             eat_own_coins = eat_own_coins.at[1, 0].set(green_reward[0])
             info["eat_own_coins"] = eat_own_coins.squeeze() * self.num_agents
 
+            # this is actual per-agent reward from the env, BEFORE shared/shaping/SVO/etc, used only for logging/fairness metrics
+            # different from the actual optimization target
+            info["raw_reward_individual"] = raw_reward_individual
+
             # if self.shared_rewards:
             #     rewards = jnp.zeros((2, 1))
             #     rewards = rewards.at[0, 0].set(red_reward[0])
@@ -1023,6 +1034,9 @@ class CoinGame(MultiAgentEnv):
             )
             outer_t = state.outer_t
             reset_outer = outer_t == num_outer_steps
+
+            # reset_outer boolean for each agent, and also for the "__all__" key to indicate if the entire environment is done
+            # agents should all have same reset_outer value
             done = {f'{a}': reset_outer for a in self.agents}
             # done = [reset_outer for _ in self.agents]
             done["__all__"] = reset_outer
