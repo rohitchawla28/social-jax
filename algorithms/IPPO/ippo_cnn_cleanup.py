@@ -174,9 +174,11 @@ def make_train(config):
         config["NUM_ACTORS"] = env.num_agents * config["NUM_ENVS"]
     else:
         config["NUM_ACTORS"] = config["NUM_ENVS"]
+
     config["NUM_UPDATES"] = (
         config["TOTAL_TIMESTEPS"] // config["NUM_STEPS"] // config["NUM_ENVS"]
     )
+
     config["MINIBATCH_SIZE"] = (
         config["NUM_ACTORS"] * config["NUM_STEPS"] // config["NUM_MINIBATCHES"]
     )
@@ -204,21 +206,22 @@ def make_train(config):
         )
         return config["LR"] * frac
 
-    def train(rng):
-
-        # INIT NETWORK
-        if config["PARAMETER_SHARING"]:
-            network = ActorCritic(env.action_space().n, activation=config["ACTIVATION"])
-        else:
-            network = [ActorCritic(env.action_space().n, activation=config["ACTIVATION"]) for _ in range(env.num_agents)]
+    # INIT NETWORK
+    if config["PARAMETER_SHARING"]:
+        network = ActorCritic(env.action_space().n, activation=config["ACTIVATION"])
+    else:
+        network = [ActorCritic(env.action_space().n, activation=config["ACTIVATION"]) for _ in range(env.num_agents)]
         
-        rng, _rng = jax.random.split(rng)
-        init_x = jnp.zeros((1, *(env.observation_space()[0]).shape))
+    init_x = jnp.zeros((1, *(env.observation_space()[0]).shape))
 
+    # helper method for init_runner_state() to create TrainState object
+    def _make_train_state(rng):
+        rng, _rng = jax.random.split(rng)
         if config["PARAMETER_SHARING"]:
             network_params = network.init(_rng, init_x)
         else:
             network_params = [network[i].init(_rng, init_x) for i in range(env.num_agents)]
+
         if config["ANNEAL_LR"]:
             tx = optax.chain(
                 optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
@@ -229,423 +232,431 @@ def make_train(config):
                 optax.clip_by_global_norm(config["MAX_GRAD_NORM"]),
                 optax.adam(config["LR"], eps=1e-5),
             )
+
         if config["PARAMETER_SHARING"]:
-            train_state = TrainState.create(
-                apply_fn=network.apply,
-                params=network_params,
-                tx=tx,
-            )
+            train_state = TrainState.create(apply_fn=network.apply, params=network_params, tx=tx)
         else:
-            train_state = [TrainState.create(
-                apply_fn=network[i].apply,
-                params=network_params[i],
-                tx=tx,
-            ) for i in range(env.num_agents)]
+            train_state = [
+                TrainState.create(apply_fn=network[i].apply, params=network_params[i], tx=tx)
+                for i in range(env.num_agents)
+            ]
+        return train_state, rng
+
+    # new method for chunk refactor
+    # runner state init method called once only
+    def init_runner_state(rng):
+        train_state, rng = _make_train_state(rng)
 
         # INIT ENV
         rng, _rng = jax.random.split(rng)
         reset_rng = jax.random.split(_rng, config["NUM_ENVS"])
+
         obsv, env_state = jax.vmap(env.reset, in_axes=(0,))(reset_rng)
-
-        # TRAIN LOOP
-        def _update_step(runner_state, unused):
-            # COLLECT TRAJECTORIES
-            def _env_step(runner_state, unused):
-                train_state, env_state, last_obs, update_step, rng = runner_state
-
-                # SELECT ACTION
-                rng, _rng = jax.random.split(rng)
-
-
-                
-                # obs_batch = jnp.stack([last_obs[a] for a in env.agents]).reshape(-1, *env.observation_space().shape)
-                
-                if config["PARAMETER_SHARING"]:
-                    obs_batch = jnp.transpose(last_obs,(1,0,2,3,4)).reshape(-1, *(env.observation_space()[0]).shape)
-                    print("input_obs_shape", obs_batch.shape)
-                    pi, value = network.apply(train_state.params, obs_batch)
-                    action = pi.sample(seed=_rng)
-                    log_prob = pi.log_prob(action)
-                    env_act = unbatchify(
-                        action, env.agents, config["NUM_ENVS"], env.num_agents
-                    )
-                else:
-                    obs_batch = jnp.transpose(last_obs,(1,0,2,3,4))
-                    env_act = {}
-                    log_prob = []
-                    value = []
-                    for i in range(env.num_agents):
-                        print("input_obs_shape", obs_batch[i].shape)
-                        pi, value_i = network[i].apply(train_state[i].params, obs_batch[i])
-                        action = pi.sample(seed=_rng)
-                        log_prob.append(pi.log_prob(action))
-                        env_act[env.agents[i]] = action
-                        value.append(value_i)
-
-
-
-                # env_act = {k: v.flatten() for k, v in env_act.items()}
-                env_act = [v for v in env_act.values()]
-                
-                # STEP ENV
-                rng, _rng = jax.random.split(rng)
-                rng_step = jax.random.split(_rng, config["NUM_ENVS"])
-
-                obsv, env_state, reward, done, info = jax.vmap(
-                    env.step, in_axes=(0, 0, 0)
-                )(rng_step, env_state, env_act)
-
-                # current_timestep = update_step*config["NUM_STEPS"]*config["NUM_ENVS"]
-                # shaped_reward = compute_grouped_rewards(reward)
-                # reward = jax.tree_map(lambda x,y: x*rew_shaping_anneal_org(current_timestep)+y*rew_shaping_anneal(current_timestep), reward, shaped_reward)
-
-                
-                if config["PARAMETER_SHARING"]:
-                    # Incorrect env-major flattening:
-                        # info = jax.tree_util.tree_map(lambda x: x.reshape((config["NUM_ACTORS"])), info)
-                    
-                    # need to transpose to (num_agents, NUM_ENVS) before 
-                    # flattening to match agent-major of obs/reward/done
-                    info = jax.tree_util.tree_map(
-                        lambda x: jnp.transpose(x, (1, 0)).reshape((config["NUM_ACTORS"],)),
-                        info,
-                    )
-                    transition = Transition(
-                        batchify_dict(done, env.agents, config["NUM_ACTORS"]).squeeze(),
-                        action,
-                        value,
-                        batchify(reward, env.agents, config["NUM_ACTORS"]).squeeze(),
-                        log_prob,
-                        obs_batch,
-                        info,
-                        )
-                else:
-                    transition = []
-                    done_list = [v for v in done.values()]
-                    for i in range(env.num_agents):
-                        info_i = {key: jax.tree_util.tree_map(lambda x: x.reshape((config["NUM_ACTORS"]),1), value[:,i]) for key, value in info.items()}
-                        transition.append(Transition(
-                            done_list[i],
-                            env_act[i],
-                            value[i],
-                            reward[:,i],
-                            log_prob[i],
-                            obs_batch[i],
-                            info_i,
-                        ))
-                runner_state = (train_state, env_state, obsv, update_step, rng)
-                return runner_state, transition
-
-            runner_state, traj_batch = jax.lax.scan(
-                _env_step, runner_state, None, config["NUM_STEPS"]
-            )
-
-            # CALCULATE ADVANTAGE
-            train_state, env_state, last_obs, update_step, rng = runner_state
-            if config["PARAMETER_SHARING"]:
-                last_obs_batch = jnp.transpose(last_obs,(1,0,2,3,4)).reshape(-1, *(env.observation_space()[0]).shape)
-                _, last_val = network.apply(train_state.params, last_obs_batch)
-            else:
-                last_obs_batch = jnp.transpose(last_obs,(1,0,2,3,4))
-                last_val = []
-                for i in range(env.num_agents):
-                    _, last_val_i = network[i].apply(train_state[i].params, last_obs_batch[i])
-                    last_val.append(last_val_i)
-                last_val = jnp.stack(last_val, axis=0)
-
-            def _calculate_gae(traj_batch, last_val):
-                def _get_advantages(gae_and_next_value, transition):
-                    gae, next_value = gae_and_next_value
-                    done, value, reward = (
-                        transition.done,
-                        transition.value,
-                        transition.reward,
-                    )
-                    # reward_mean = jnp.mean(reward, axis=0)
-                    # # reward_std = jnp.std(reward, axis=0) + 1e-8
-                    # reward = (reward - reward_mean)# / reward_std
-
-                    delta = reward + config["GAMMA"] * next_value * (1 - done) - value
-                    gae = (
-                        delta
-                        + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
-                    )
-                    return (gae, value), gae
-                
-                _, advantages = jax.lax.scan(
-                    _get_advantages,
-                    (jnp.zeros_like(last_val), last_val),
-                    traj_batch,
-                    reverse=True,
-                    unroll=16,
-                )
-                return advantages, advantages + traj_batch.value
-            if config["PARAMETER_SHARING"]:
-                advantages, targets = _calculate_gae(traj_batch, last_val)
-            else:
-                advantages = []
-                targets = []
-                for i in range(env.num_agents):
-                    advantages_i, targets_i = _calculate_gae(traj_batch[i], last_val[i])
-                    advantages.append(advantages_i)
-                    targets.append(targets_i)
-                advantages = jnp.stack(advantages, axis=0)
-                targets = jnp.stack(targets, axis=0)
-            # UPDATE NETWORK
-            def _update_epoch(update_state, unused, i):
-                def _update_minbatch(train_state, batch_info, network_used):
-                    traj_batch, advantages, targets = batch_info
-
-                    def _loss_fn(params, traj_batch, gae, targets, network_used):
-                        # RERUN NETWORK
-                        pi, value = network_used.apply(params, traj_batch.obs)
-                        log_prob = pi.log_prob(traj_batch.action)
-                        # CALCULATE VALUE LOSS
-                        value_pred_clipped = traj_batch.value + (
-                            value - traj_batch.value
-                        ).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
-                        value_losses = jnp.square(value - targets)
-                        value_losses_clipped = jnp.square(value_pred_clipped - targets)
-                        value_loss = (
-                            0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
-                        )
-
-                        # CALCULATE ACTOR LOSS
-                        ratio = jnp.exp(log_prob - traj_batch.log_prob)
-                        gae = (gae - gae.mean()) / (gae.std() + 1e-8)
-                        loss_actor1 = ratio * gae
-                        loss_actor2 = (
-                            jnp.clip(
-                                ratio,
-                                1.0 - config["CLIP_EPS"],
-                                1.0 + config["CLIP_EPS"],
-                            )
-                            * gae
-                        )
-                        loss_actor = -jnp.minimum(loss_actor1, loss_actor2)
-                        loss_actor = loss_actor.mean()
-                        entropy = pi.entropy().mean()
-
-                        # log critic prediction value as well for analyzing training dynamics
-                        value_mean = value.mean()
-
-                        total_loss = (
-                            loss_actor
-                            + config["VF_COEF"] * value_loss
-                            - config["ENT_COEF"] * entropy
-                        )
-                        return total_loss, (value_loss, loss_actor, entropy, value_mean)
-
-
-                    grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
-
-                    # changed to actually extract the auxiliary metrics along w/ total_loss
-                    (total_loss, (value_loss, loss_actor, entropy, value_mean)), grads = grad_fn(
-                        train_state.params, traj_batch, advantages, targets, network_used
-                    )
-
-                    # calculate gradient norm for additional training metric
-                    grad_norm = optax.global_norm(grads)
-
-                    train_state = train_state.apply_gradients(grads=grads)
-                    train_metrics = {
-                        "train/total_loss": total_loss,
-                        "train/value_loss": value_loss,
-                        "train/value_mean": value_mean,
-                        "train/entropy": entropy,
-                        "train/grad_norm": grad_norm,
-                    }
-                    return train_state, train_metrics
-
-                train_state, traj_batch, advantages, targets, rng = update_state
-                rng, _rng = jax.random.split(rng)
-                batch_size = config["MINIBATCH_SIZE"] * config["NUM_MINIBATCHES"]
-                assert (
-                    batch_size == config["NUM_STEPS"] * config["NUM_ACTORS"]
-                ), "batch size must be equal to number of steps * number of actors"
-                permutation = jax.random.permutation(_rng, batch_size)
-                batch = (traj_batch, advantages, targets)
-                batch = jax.tree_util.tree_map(
-                        lambda x: x.reshape((batch_size,) + x.shape[2:]), batch
-                    )
-                # if config["PARAMETER_SHARING"]:
-                    
-                # else:
-                #     batch = jax.tree_util.tree_map(
-                #         lambda x: x.reshape((batch_size,) + x.shape[2:]),  # 保持第一个维度为batch_size，自动计算第二个维度
-                #         batch
-                #     )
-                shuffled_batch = jax.tree_util.tree_map(
-                    lambda x: jnp.take(x, permutation, axis=0), batch
-                )
-                minibatches = jax.tree_util.tree_map(
-                    lambda x: jnp.reshape(
-                        x, [config["NUM_MINIBATCHES"], -1] + list(x.shape[1:])
-                    ),
-                    shuffled_batch,
-                )
-                if config["PARAMETER_SHARING"]:
-                    train_state, train_metrics = jax.lax.scan(
-                        lambda state, batch_info: _update_minbatch(state, batch_info, network), train_state, minibatches
-                    )
-                else:
-                    train_state, train_metrics = jax.lax.scan(
-                        lambda state, batch_info: _update_minbatch(state, batch_info, network[i]), train_state, minibatches
-                    )
-
-                update_state = (train_state, traj_batch, advantages, targets, rng)
-                return update_state, train_metrics
-            
-            if config["PARAMETER_SHARING"]:
-                update_state = (train_state, traj_batch, advantages, targets, rng)
-                update_state, loss_info = jax.lax.scan(
-                    lambda state, unused: _update_epoch(state, unused, 0), update_state, None, config["UPDATE_EPOCHS"]
-                )
-                train_state = update_state[0]
-                metric = traj_batch.info
-
-                # avg the training metrics over epochs and minibatches to get 1 scalar per metric each update_step
-                # this matches their logging granularity
-                train_metric = jax.tree_util.tree_map(lambda x: x.mean(), loss_info)
-                metric = {**metric, **train_metric}
-                rng = update_state[-1]
-            else:
-                update_state_dict = []
-                metric = []
-                for i in range(env.num_agents):
-                    update_state = (train_state[i], traj_batch[i], advantages[i], targets[i], rng)
-                    update_state, loss_info = jax.lax.scan(
-                        lambda state, unused: _update_epoch(state, unused, i), update_state, None, config["UPDATE_EPOCHS"]
-                    )
-                    update_state_dict.append(update_state)
-                    train_state[i] = update_state[0]
-                    metric_i = traj_batch[i].info
-                    train_metric_i = jax.tree_util.tree_map(lambda x: x.mean(), loss_info)
-                    metric_i = {**metric_i, **train_metric_i}
-                    metric.append(metric_i)
-                    rng = update_state[-1]
-                
-            def callback(metric):
-                wandb.log(metric, step=metric["env_step"])
-
-            update_step = update_step + 1
-
-            # REMOVED bc avg across all timesteps wasnt good
-                # write metrics to wandb after every update step / rollout
-                # metric = jax.tree_util.tree_map(lambda x: x.mean(), metric)
-
-            # NOTE: some fields (ex: returned_episode_returns) are episodic and only become non-zero at episode end
-            def _reduce_metric_dict(m):
-                """
-                Reduce per-update metrics for fixed rollouts (1 episode per rollout)
-                - episodic signals (returned_episode_*) -> take last timestep, then mean over actors
-                - per-step signals that represent counts/returns (raw_reward_individual, clean_action_info, cleaned_water)
-                -> reshape to (T, num_agents, NUM_ENVS), sum over time -> episode totals
-                - fairness metrics computed from raw episode returns per agent
-                """
-                episode_keys = ("returned_episode_returns", "returned_episode_lengths", "returned_episode")
-                out = {}
-
-                T = config["NUM_STEPS"]
-                A = env.num_agents
-                E = config["NUM_ENVS"]
-
-                # ---------- raw rewards -> episode returns + fairness ----------
-                if "raw_reward_individual" in m:
-                    raw = m["raw_reward_individual"]  # expected (T, NUM_ACTORS)
-
-                    if raw.ndim == 2:
-                        raw = raw.reshape((T, A, E))
-
-                    ep_return_agent_env = raw.sum(axis=0)          # (A, E)
-                    mean_ep_return_per_agent = ep_return_agent_env.mean(axis=1)   # (A,)
-                    mean_ep_return_team = ep_return_agent_env.sum(axis=0).mean()  # scalar
-
-                    # variance across agents (then avg across envs)
-                    mean_ep_return_variance = ep_return_agent_env.var(axis=0).mean()
-
-                    # has some nonConcreteBooleanIndexError from Jax, so commenting out for now
-                    # pairwise abs diff across agents (upper triangle), then avg across envs
-                    # diff = jnp.abs(ep_return_agent_env[:, None, :] - ep_return_agent_env[None, :, :])  # (A, A, E)
-                    # mask = jnp.triu(jnp.ones((A, A), dtype=bool), k=1)[:, :, None]               # (A, A, 1)
-                    # mean_ep_pairwise_absdiff = diff[mask].mean()
-
-                    for i in range(A):
-                        out[f"rollout/raw_ep_return_agent{i}"] = mean_ep_return_per_agent[i]
-
-                    out["rollout/raw_ep_return_team"] = mean_ep_return_team
-                    out["rollout/raw_ep_return_variance"] = mean_ep_return_variance
-                    # out["rollout/raw_ep_pairwise_absdiff"] = mean_ep_pairwise_absdiff
-
-                # ---------- cleanup-specific per-step counters -> episode totals ----------
-                def _sum_episode_total(key):
-                    if key not in m:
-                        return
-                    x = m[key]  # (T, NUM_ACTORS)
-                    if x.ndim == 2:
-                        x = x.reshape((T, A, E))
-                    ep_total_agent_env = x.sum(axis=0)                  # (A, E)
-                    mean_per_agent = ep_total_agent_env.mean(axis=1)    # (A,)
-                    mean_team = ep_total_agent_env.sum(axis=0).mean()   # scalar
-                    for i in range(A):
-                        out[f"rollout/{key}_agent{i}"] = mean_per_agent[i]
-                    out[f"rollout/{key}_team"] = mean_team
-
-                _sum_episode_total("clean_action_info")
-                _sum_episode_total("cleaned_water")
-
-                # ---------- default handling for other keys ----------
-                for k, v in m.items():
-                    # don't log per-step raw rewards / counters directly (we logged reduced versions above)
-                    if k in ("raw_reward_individual", "clean_action_info", "cleaned_water"):
-                        continue
-
-                    # v usually has shape (T, NUM_ACTORS)
-                    if k in episode_keys:
-                        out[k] = v[-1].mean()
-                    else:
-                        # for non-episodic scalar training losses etc, mean is fine
-                        out[k] = v.mean()
-
-                return out
-            
-            if config["PARAMETER_SHARING"]:
-                metric = _reduce_metric_dict(metric)
-            else:
-                metric = [_reduce_metric_dict(m_i) for m_i in metric]
-                metric = metric[0]  # keep logging structure same as your current script
-
-            metric["update_step"] = update_step
-            metric["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
-
-            jax.debug.callback(callback, metric)
-
-            # if config["PARAMETER_SHARING"]:
-            #     metric["update_step"] = update_step
-            #     metric["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
-            # else:
-            #     for i in range(env.num_agents):
-            #         metric[i]["update_step"] = update_step
-            #         metric[i]["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
-            #     metric = metric[0]
-            # metric["update_step"] = update_step
-            # metric["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
-            
-
-            # moving this to the reduce_metric_dict, maybe need to do with eat_own_coins
-            # metric["clean_action_info"] = metric["clean_action_info"] * config["ENV_KWARGS"]["num_inner_steps"]
-
-            runner_state = (train_state, env_state, last_obs, update_step, rng)
-            return runner_state, metric
-
         rng, _rng = jax.random.split(rng)
-        runner_state = (train_state, env_state, obsv, 0, _rng)
-        runner_state, metric = jax.lax.scan(
-            _update_step, runner_state, None, config["NUM_UPDATES"]
-        )
-        return {"runner_state": runner_state, "metrics": metric}
 
-    return train
+        return (train_state, env_state, obsv, 0, _rng)
+
+    # TRAIN LOOP
+    def _update_step(runner_state, unused):
+        # COLLECT TRAJECTORIES
+        def _env_step(runner_state, unused):
+            train_state, env_state, last_obs, update_step, rng = runner_state
+
+            # SELECT ACTION
+            rng, _rng = jax.random.split(rng)
+            # obs_batch = jnp.stack([last_obs[a] for a in env.agents]).reshape(-1, *env.observation_space().shape)
+            if config["PARAMETER_SHARING"]:
+                obs_batch = jnp.transpose(last_obs,(1,0,2,3,4)).reshape(-1, *(env.observation_space()[0]).shape)
+                # print("input_obs_shape", obs_batch.shape)
+                pi, value = network.apply(train_state.params, obs_batch)
+                action = pi.sample(seed=_rng)
+                log_prob = pi.log_prob(action)
+                env_act = unbatchify(
+                    action, env.agents, config["NUM_ENVS"], env.num_agents
+                )
+            else:
+                obs_batch = jnp.transpose(last_obs,(1,0,2,3,4))
+                env_act = {}
+                log_prob = []
+                value = []
+                for i in range(env.num_agents):
+                    # print("input_obs_shape", obs_batch[i].shape)
+                    pi, value_i = network[i].apply(train_state[i].params, obs_batch[i])
+                    action = pi.sample(seed=_rng)
+                    log_prob.append(pi.log_prob(action))
+                    env_act[env.agents[i]] = action
+                    value.append(value_i)
+
+
+
+            # env_act = {k: v.flatten() for k, v in env_act.items()}
+            env_act = [v for v in env_act.values()]
+            
+            # STEP ENV
+            rng, _rng = jax.random.split(rng)
+            rng_step = jax.random.split(_rng, config["NUM_ENVS"])
+
+            obsv, env_state, reward, done, info = jax.vmap(
+                env.step, in_axes=(0, 0, 0)
+            )(rng_step, env_state, env_act)
+
+            # current_timestep = update_step*config["NUM_STEPS"]*config["NUM_ENVS"]
+            # shaped_reward = compute_grouped_rewards(reward)
+            # reward = jax.tree_map(lambda x,y: x*rew_shaping_anneal_org(current_timestep)+y*rew_shaping_anneal(current_timestep), reward, shaped_reward)
+
+            
+            if config["PARAMETER_SHARING"]:
+                # Incorrect env-major flattening:
+                    # info = jax.tree_util.tree_map(lambda x: x.reshape((config["NUM_ACTORS"])), info)
+                
+                # need to transpose to (num_agents, NUM_ENVS) before 
+                # flattening to match agent-major of obs/reward/done
+                info = jax.tree_util.tree_map(
+                    lambda x: jnp.transpose(x, (1, 0)).reshape((config["NUM_ACTORS"],)),
+                    info,
+                )
+                transition = Transition(
+                    batchify_dict(done, env.agents, config["NUM_ACTORS"]).squeeze(),
+                    action,
+                    value,
+                    batchify(reward, env.agents, config["NUM_ACTORS"]).squeeze(),
+                    log_prob,
+                    obs_batch,
+                    info,
+                    )
+            else:
+                transition = []
+                done_list = [v for v in done.values()]
+                for i in range(env.num_agents):
+                    info_i = {key: jax.tree_util.tree_map(lambda x: x.reshape((config["NUM_ACTORS"]),1), value[:,i]) for key, value in info.items()}
+                    transition.append(Transition(
+                        done_list[i],
+                        env_act[i],
+                        value[i],
+                        reward[:,i],
+                        log_prob[i],
+                        obs_batch[i],
+                        info_i,
+                    ))
+            runner_state = (train_state, env_state, obsv, update_step, rng)
+            return runner_state, transition
+
+        runner_state, traj_batch = jax.lax.scan(
+            _env_step, runner_state, None, config["NUM_STEPS"]
+        )
+
+        # CALCULATE ADVANTAGE
+        train_state, env_state, last_obs, update_step, rng = runner_state
+        if config["PARAMETER_SHARING"]:
+            last_obs_batch = jnp.transpose(last_obs,(1,0,2,3,4)).reshape(-1, *(env.observation_space()[0]).shape)
+            _, last_val = network.apply(train_state.params, last_obs_batch)
+        else:
+            last_obs_batch = jnp.transpose(last_obs,(1,0,2,3,4))
+            last_val = []
+            for i in range(env.num_agents):
+                _, last_val_i = network[i].apply(train_state[i].params, last_obs_batch[i])
+                last_val.append(last_val_i)
+            last_val = jnp.stack(last_val, axis=0)
+
+        def _calculate_gae(traj_batch, last_val):
+            def _get_advantages(gae_and_next_value, transition):
+                gae, next_value = gae_and_next_value
+                done, value, reward = (
+                    transition.done,
+                    transition.value,
+                    transition.reward,
+                )
+                # reward_mean = jnp.mean(reward, axis=0)
+                # # reward_std = jnp.std(reward, axis=0) + 1e-8
+                # reward = (reward - reward_mean)# / reward_std
+
+                delta = reward + config["GAMMA"] * next_value * (1 - done) - value
+                gae = (
+                    delta
+                    + config["GAMMA"] * config["GAE_LAMBDA"] * (1 - done) * gae
+                )
+                return (gae, value), gae
+            
+            _, advantages = jax.lax.scan(
+                _get_advantages,
+                (jnp.zeros_like(last_val), last_val),
+                traj_batch,
+                reverse=True,
+                unroll=16,
+            )
+            return advantages, advantages + traj_batch.value
+        if config["PARAMETER_SHARING"]:
+            advantages, targets = _calculate_gae(traj_batch, last_val)
+        else:
+            advantages = []
+            targets = []
+            for i in range(env.num_agents):
+                advantages_i, targets_i = _calculate_gae(traj_batch[i], last_val[i])
+                advantages.append(advantages_i)
+                targets.append(targets_i)
+            advantages = jnp.stack(advantages, axis=0)
+            targets = jnp.stack(targets, axis=0)
+        # UPDATE NETWORK
+        def _update_epoch(update_state, unused, i):
+            def _update_minbatch(train_state, batch_info, network_used):
+                traj_batch, advantages, targets = batch_info
+
+                def _loss_fn(params, traj_batch, gae, targets, network_used):
+                    # RERUN NETWORK
+                    pi, value = network_used.apply(params, traj_batch.obs)
+                    log_prob = pi.log_prob(traj_batch.action)
+                    # CALCULATE VALUE LOSS
+                    value_pred_clipped = traj_batch.value + (
+                        value - traj_batch.value
+                    ).clip(-config["CLIP_EPS"], config["CLIP_EPS"])
+                    value_losses = jnp.square(value - targets)
+                    value_losses_clipped = jnp.square(value_pred_clipped - targets)
+                    value_loss = (
+                        0.5 * jnp.maximum(value_losses, value_losses_clipped).mean()
+                    )
+
+                    # CALCULATE ACTOR LOSS
+                    ratio = jnp.exp(log_prob - traj_batch.log_prob)
+                    gae = (gae - gae.mean()) / (gae.std() + 1e-8)
+                    loss_actor1 = ratio * gae
+                    loss_actor2 = (
+                        jnp.clip(
+                            ratio,
+                            1.0 - config["CLIP_EPS"],
+                            1.0 + config["CLIP_EPS"],
+                        )
+                        * gae
+                    )
+                    loss_actor = -jnp.minimum(loss_actor1, loss_actor2)
+                    loss_actor = loss_actor.mean()
+                    entropy = pi.entropy().mean()
+
+                    # log critic prediction value as well for analyzing training dynamics
+                    value_mean = value.mean()
+
+                    total_loss = (
+                        loss_actor
+                        + config["VF_COEF"] * value_loss
+                        - config["ENT_COEF"] * entropy
+                    )
+                    return total_loss, (value_loss, loss_actor, entropy, value_mean)
+
+
+                grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
+
+                # changed to actually extract the auxiliary metrics along w/ total_loss
+                (total_loss, (value_loss, loss_actor, entropy, value_mean)), grads = grad_fn(
+                    train_state.params, traj_batch, advantages, targets, network_used
+                )
+
+                # calculate gradient norm for additional training metric
+                grad_norm = optax.global_norm(grads)
+
+                train_state = train_state.apply_gradients(grads=grads)
+                train_metrics = {
+                    "train/total_loss": total_loss,
+                    "train/value_loss": value_loss,
+                    "train/value_mean": value_mean,
+                    "train/entropy": entropy,
+                    "train/grad_norm": grad_norm,
+                }
+                return train_state, train_metrics
+
+            train_state, traj_batch, advantages, targets, rng = update_state
+            rng, _rng = jax.random.split(rng)
+            batch_size = config["MINIBATCH_SIZE"] * config["NUM_MINIBATCHES"]
+            assert (
+                batch_size == config["NUM_STEPS"] * config["NUM_ACTORS"]
+            ), "batch size must be equal to number of steps * number of actors"
+            permutation = jax.random.permutation(_rng, batch_size)
+            batch = (traj_batch, advantages, targets)
+            batch = jax.tree_util.tree_map(
+                    lambda x: x.reshape((batch_size,) + x.shape[2:]), batch
+                )
+            # if config["PARAMETER_SHARING"]:
+                
+            # else:
+            #     batch = jax.tree_util.tree_map(
+            #         lambda x: x.reshape((batch_size,) + x.shape[2:]),  # 保持第一个维度为batch_size，自动计算第二个维度
+            #         batch
+            #     )
+            shuffled_batch = jax.tree_util.tree_map(
+                lambda x: jnp.take(x, permutation, axis=0), batch
+            )
+            minibatches = jax.tree_util.tree_map(
+                lambda x: jnp.reshape(
+                    x, [config["NUM_MINIBATCHES"], -1] + list(x.shape[1:])
+                ),
+                shuffled_batch,
+            )
+            if config["PARAMETER_SHARING"]:
+                train_state, train_metrics = jax.lax.scan(
+                    lambda state, batch_info: _update_minbatch(state, batch_info, network), train_state, minibatches
+                )
+            else:
+                train_state, train_metrics = jax.lax.scan(
+                    lambda state, batch_info: _update_minbatch(state, batch_info, network[i]), train_state, minibatches
+                )
+
+            update_state = (train_state, traj_batch, advantages, targets, rng)
+            return update_state, train_metrics
+        
+        if config["PARAMETER_SHARING"]:
+            update_state = (train_state, traj_batch, advantages, targets, rng)
+            update_state, loss_info = jax.lax.scan(
+                lambda state, unused: _update_epoch(state, unused, 0), update_state, None, config["UPDATE_EPOCHS"]
+            )
+            train_state = update_state[0]
+            metric = traj_batch.info
+
+            # avg the training metrics over epochs and minibatches to get 1 scalar per metric each update_step
+            # this matches their logging granularity
+            train_metric = jax.tree_util.tree_map(lambda x: x.mean(), loss_info)
+            metric = {**metric, **train_metric}
+            rng = update_state[-1]
+        else:
+            update_state_dict = []
+            metric = []
+            for i in range(env.num_agents):
+                update_state = (train_state[i], traj_batch[i], advantages[i], targets[i], rng)
+                update_state, loss_info = jax.lax.scan(
+                    lambda state, unused: _update_epoch(state, unused, i), update_state, None, config["UPDATE_EPOCHS"]
+                )
+                update_state_dict.append(update_state)
+                train_state[i] = update_state[0]
+                metric_i = traj_batch[i].info
+                train_metric_i = jax.tree_util.tree_map(lambda x: x.mean(), loss_info)
+                metric_i = {**metric_i, **train_metric_i}
+                metric.append(metric_i)
+                rng = update_state[-1]
+            
+        def callback(metric):
+            wandb.log(metric, step=metric["env_step"])
+
+        update_step = update_step + 1
+
+        # REMOVED bc avg across all timesteps wasnt good
+            # write metrics to wandb after every update step / rollout
+            # metric = jax.tree_util.tree_map(lambda x: x.mean(), metric)
+
+        # NOTE: some fields (ex: returned_episode_returns) are episodic and only become non-zero at episode end
+        def _reduce_metric_dict(m):
+            """
+            Reduce per-update metrics for fixed rollouts (1 episode per rollout)
+            - episodic signals (returned_episode_*) -> take last timestep, then mean over actors
+            - per-step signals that represent counts/returns (raw_reward_individual, clean_action_info, cleaned_water)
+            -> reshape to (T, num_agents, NUM_ENVS), sum over time -> episode totals
+            - fairness metrics computed from raw episode returns per agent
+            """
+            episode_keys = ("returned_episode_returns", "returned_episode_lengths", "returned_episode")
+            out = {}
+
+            T = config["NUM_STEPS"]
+            A = env.num_agents
+            E = config["NUM_ENVS"]
+
+            # ---------- raw rewards -> episode returns + fairness ----------
+            if "raw_reward_individual" in m:
+                raw = m["raw_reward_individual"]  # expected (T, NUM_ACTORS)
+
+                if raw.ndim == 2:
+                    raw = raw.reshape((T, A, E))
+
+                ep_return_agent_env = raw.sum(axis=0)          # (A, E)
+                mean_ep_return_per_agent = ep_return_agent_env.mean(axis=1)   # (A,)
+                mean_ep_return_team = ep_return_agent_env.sum(axis=0).mean()  # scalar
+
+                # variance across agents (then avg across envs)
+                mean_ep_return_variance = ep_return_agent_env.var(axis=0).mean()
+
+                # has some nonConcreteBooleanIndexError from Jax, so commenting out for now
+                # pairwise abs diff across agents (upper triangle), then avg across envs
+                # diff = jnp.abs(ep_return_agent_env[:, None, :] - ep_return_agent_env[None, :, :])  # (A, A, E)
+                # mask = jnp.triu(jnp.ones((A, A), dtype=bool), k=1)[:, :, None]               # (A, A, 1)
+                # mean_ep_pairwise_absdiff = diff[mask].mean()
+
+                for i in range(A):
+                    out[f"rollout/raw_ep_return_agent{i}"] = mean_ep_return_per_agent[i]
+
+                out["rollout/raw_ep_return_team"] = mean_ep_return_team
+                out["rollout/raw_ep_return_variance"] = mean_ep_return_variance
+                # out["rollout/raw_ep_pairwise_absdiff"] = mean_ep_pairwise_absdiff
+
+            # ---------- cleanup-specific per-step counters -> episode totals ----------
+            def _sum_episode_total(key):
+                if key not in m:
+                    return
+                x = m[key]  # (T, NUM_ACTORS)
+                if x.ndim == 2:
+                    x = x.reshape((T, A, E))
+                ep_total_agent_env = x.sum(axis=0)                  # (A, E)
+                mean_per_agent = ep_total_agent_env.mean(axis=1)    # (A,)
+                mean_team = ep_total_agent_env.sum(axis=0).mean()   # scalar
+                for i in range(A):
+                    out[f"rollout/{key}_agent{i}"] = mean_per_agent[i]
+                out[f"rollout/{key}_team"] = mean_team
+
+            _sum_episode_total("clean_action_info")
+            _sum_episode_total("cleaned_water")
+
+            # ---------- default handling for other keys ----------
+            for k, v in m.items():
+                # don't log per-step raw rewards / counters directly (we logged reduced versions above)
+                if k in ("raw_reward_individual", "clean_action_info", "cleaned_water"):
+                    continue
+
+                # v usually has shape (T, NUM_ACTORS)
+                if k in episode_keys:
+                    out[k] = v[-1].mean()
+                else:
+                    # for non-episodic scalar training losses etc, mean is fine
+                    out[k] = v.mean()
+
+            return out
+        
+        if config["PARAMETER_SHARING"]:
+            metric = _reduce_metric_dict(metric)
+        else:
+            metric = [_reduce_metric_dict(m_i) for m_i in metric]
+            metric = metric[0]  # keep logging structure same as your current script
+
+        metric["update_step"] = update_step
+        metric["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
+
+        jax.debug.callback(callback, metric)
+
+        # if config["PARAMETER_SHARING"]:
+        #     metric["update_step"] = update_step
+        #     metric["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
+        # else:
+        #     for i in range(env.num_agents):
+        #         metric[i]["update_step"] = update_step
+        #         metric[i]["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
+        #     metric = metric[0]
+        # metric["update_step"] = update_step
+        # metric["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
+        
+
+        # moving this to the reduce_metric_dict, maybe need to do with eat_own_coins
+        # metric["clean_action_info"] = metric["clean_action_info"] * config["ENV_KWARGS"]["num_inner_steps"]
+
+        runner_state = (train_state, env_state, last_obs, update_step, rng)
+        return runner_state, metric
+
+    num_evals = 10
+    chunk_updates = max(1, config["NUM_UPDATES"] // num_evals)
+    remainder_updates = config["NUM_UPDATES"] - (num_evals * chunk_updates)
+
+    def train_chunk(runner_state):
+        return jax.lax.scan(_update_step, runner_state, None, chunk_updates)
+
+    if remainder_updates > 0:
+        def remainder_chunk(runner_state):
+            return jax.lax.scan(_update_step, runner_state, None, remainder_updates)
+    else:
+        remainder_chunk = None
+
+    return init_runner_state, train_chunk, remainder_chunk, chunk_updates, remainder_updates
 
 def single_run(config):
     config = OmegaConf.to_container(config)
@@ -655,33 +666,101 @@ def single_run(config):
     wandb.init(
         entity=config["ENTITY"],
         project=config["PROJECT"],
-        tags=["IPPO", "FF"],
+        tags=["IPPO"],
         group=config["WANDB_GROUP"],
         config=config,
         mode=config["WANDB_MODE"],
         name=f'ippo_cnn_cleanup'
     )
 
-    rng = jax.random.PRNGKey(config["SEED"])
-    rngs = jax.random.split(rng, config["NUM_SEEDS"])
-    train_jit = jax.jit(make_train(config))
-    out = jax.vmap(train_jit)(rngs)
+    # Before chunk refactor
+        # train_jit = jax.jit(make_train(config))
+        # out = jax.vmap(train_jit)(rngs)
 
-    print("** Saving Results **")
-    filename = f'{config["ENV_NAME"]}_seed{config["SEED"]}'
-    train_state = jax.tree_util.tree_map(lambda x: x[0], out["runner_state"][0])
-    save_path = f"./checkpoints/individual/{filename}.pkl"
+    # ===== CHUNKING REFACTOR ======
+    init_runner_state, train_chunk, remainder_chunk, chunk_updates, remainder_updates = make_train(config)
+    init_jit = jax.jit(init_runner_state)
+
+    # chunk_jit is a scan for _update_step() over chunk_updates == 3906 // 10 = 390 updates
+    chunk_jit = jax.jit(train_chunk)
+
+    remainder_jit = None
+    if remainder_chunk is not None:
+        remainder_jit = jax.jit(remainder_chunk)   
+
+    rng = jax.random.PRNGKey(config["SEED"])
+    print(f"config seed: {config['SEED']}")
+    runner_state = init_jit(rng)
+
+    num_evals = 10
+    for k in range(num_evals):
+        runner_state, _ = chunk_jit(runner_state)
+
+        # extract params for eval
+        train_state = runner_state[0]
+        if config["PARAMETER_SHARING"]:
+            params = train_state.params
+        else:
+            params = [ts.params for ts in train_state]
+
+        update_step = int(runner_state[3])
+        env_step = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
+
+        # log eval metrics exactly 10 times
+        # setting wandb_step so it's more clear with eval and train metrics
+            # setting it to env_step instead of update_step so that if i change NUM_STEPS or NUM_ENVS, logging still comparable
+        evaluate(
+            params,
+            socialjax.make(config["ENV_NAME"], **config["ENV_KWARGS"]),
+            save_path=None,
+            config=config,
+            wandb_step=env_step,
+            log_gif=False
+        )
+
+    # REMAINDER CHUNK
+    # Since NUM_UPDATES not divisible by 10, do remainder updates chunk and 1 final eval for 11 evals total
+    if remainder_updates > 0:
+        # print(f"Remainder updates > 0, == {remainder_updates}")
+        runner_state, _ = remainder_jit(runner_state)
+
+    # final eval after all updates, only eval that logs GIF
+    train_state = runner_state[0]
     if config["PARAMETER_SHARING"]:
-        save_path = f"./checkpoints/indvidual/{filename}.pkl"
-        save_params(train_state, save_path)
-        params = load_params(save_path)
+        params = train_state.params
     else:
-        params = []
-        for i in range(config['ENV_KWARGS']['num_agents']):
-            save_path = f"./checkpoints/individual/{filename}_{i}.pkl"
-            save_params(train_state[i], save_path)
-            params.append(load_params(save_path))
-    evaluate(params, socialjax.make(config["ENV_NAME"], **config["ENV_KWARGS"]), save_path, config)
+        params = [ts.params for ts in train_state]
+    
+    update_step = int(runner_state[3])
+    env_step = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
+
+    evaluate(
+        params,
+        socialjax.make(config["ENV_NAME"], **config["ENV_KWARGS"]),
+        save_path=None,
+        config=config,
+        wandb_step=env_step,
+        log_gif=True,
+    )
+    print("Finished training and evals")
+
+    # Removed b/c doing new chunking refactor for eval every 10%, also don't need to save params
+        # print("** Saving Results **")
+        # filename = f'{config["ENV_NAME"]}_seed{config["SEED"]}'
+        # train_state = jax.tree_util.tree_map(lambda x: x[0], out["runner_state"][0])
+        # save_path = f"./checkpoints/individual/{filename}.pkl"
+        # if config["PARAMETER_SHARING"]:
+        #     save_path = f"./checkpoints/indvidual/{filename}.pkl"
+        #     save_params(train_state, save_path)
+        #     params = load_params(save_path)
+        # else:
+        #     params = []
+        #     for i in range(config['ENV_KWARGS']['num_agents']):
+        #         save_path = f"./checkpoints/individual/{filename}_{i}.pkl"
+        #         save_params(train_state[i], save_path)
+        #         params.append(load_params(save_path))
+        # evaluate(params, socialjax.make(config["ENV_NAME"], **config["ENV_KWARGS"]), save_path, config)
+    
     # state_seq = get_rollout(train_state.params, config)
     # viz = OvercookedVisualizer()
     # agent_view_size is hardcoded as it determines the padding around the layout.
@@ -699,12 +778,17 @@ def load_params(load_path):
         params = pickle.load(f)
     return jax.tree_util.tree_map(lambda x: jnp.array(x), params)
 
-def evaluate(params, env, save_path, config):
+def evaluate(params, env, save_path, config, wandb_step: int, log_gif: bool = False):
     rng = jax.random.PRNGKey(0)
     
     rng, _rng = jax.random.split(rng)
     obs, state = env.reset(_rng)
     done = False
+
+    # eval isn't full episode if GIF_NUM_FRAMES < num_inner_steps
+    raw_return_agents = jnp.zeros((env.num_agents,), dtype=jnp.float32)
+    # optional actual training signal team return. this should be the 2x the raw_ep_return_team since they multiplied the reward by 2
+    return_team = 0.0
     
     pics = []
     img = env.render(state)
@@ -743,6 +827,13 @@ def evaluate(params, env, save_path, config):
         rng, _rng = jax.random.split(rng)
         obs, state, reward, done, info = env.step(_rng, state, [v.item() for v in env_act.values()])
         done = done["__all__"]
+
+        # ==== EVAL METRICS ===
+        # raw per-agent reward (logging only)
+        raw_step = info["raw_reward_individual"]  # shape (n_agents,)
+        raw_return_agents = raw_return_agents + raw_step
+
+        return_team += float(sum(reward))
         
         # 记录结果
         # episode_reward += sum(reward.values())
@@ -757,25 +848,45 @@ def evaluate(params, env, save_path, config):
         # print(f'State: {state.agent_locs}')
         # print(f'State: {state.claimed_indicator_time_matrix}')
         # print("###################")
-    
-    # 保存GIF
-    print(f"Saving Episode GIF")
-    pics = [Image.fromarray(np.array(img)) for img in pics]
-    n_agents = len(env.agents)
-    gif_path = f"{root_dir}/{n_agents}-agents_seed-{config['SEED']}_frames-{o_t + 1}.gif"
-    pics[0].save(
-        gif_path,
-        format="GIF",
-        save_all=True,
-        optimize=False,
-        append_images=pics[1:],
-        duration=200,
-        loop=0,
-    )
 
-    # Log the GIF to WandB
-    print("Logging GIF to WandB")
-    wandb.log({"Episode GIF": wandb.Video(gif_path, caption="Evaluation Episode", format="gif")})
+    # ====== CALCULATE / LOG EVAL METRICS =======
+    raw_return_team = raw_return_agents.sum()
+
+    # fairness variance across agents (single env episode)
+    raw_variance = jnp.var(raw_return_agents)
+
+    # pairwise abs diff commenting out rn bc jax boolean error
+        # diff = jnp.abs(raw_ep_return_agents[:, None] - raw_ep_return_agents[None, :])  # (A, A)
+        # mask = jnp.triu(jnp.ones((env.num_agents, env.num_agents), dtype=bool), k=1)
+        # fair_pair_absdiff = diff[mask].mean()
+
+    eval_metrics = {}
+    for i in range(env.num_agents):
+        eval_metrics[f"eval/raw_return_agent{i}"] = float(raw_return_agents[i])
+    eval_metrics["eval/raw_return_team"] = float(raw_return_team)
+    eval_metrics["eval/raw_return_variance"] = float(raw_variance)
+    # eval_metrics["eval/raw_pairwise_absdiff"] = float(raw_pair_absdiff)
+    eval_metrics["eval/opt_tgt_return_team"] = float(return_team)
+
+    wandb.log(eval_metrics, step=int(wandb_step))
+
+    if log_gif:
+        print(f"Saving Episode GIF")
+        new_pics = [Image.fromarray(np.array(img)) for img in pics]
+        gif_path = f"{root_dir}/{env.num_agents}-agents_seed-{config['SEED']}_frames-{len(new_pics)}.gif"
+        new_pics[0].save(
+            gif_path,
+            format="GIF",
+            save_all=True,
+            optimize=False,
+            append_images=new_pics[1:],
+            duration=200,
+            loop=0,
+        )
+
+        # Log the GIF to WandB
+        print("Logging GIF to WandB")
+        wandb.log({"eval/episode_gif": wandb.Video(gif_path, caption="Evaluation Episode", format="gif")}, step=int(wandb_step))
         
         # print(f"Episode {episode} total reward: {episode_reward}")
 

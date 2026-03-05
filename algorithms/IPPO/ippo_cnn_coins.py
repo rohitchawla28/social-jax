@@ -876,8 +876,7 @@ def evaluate(params, env, save_path, config, wandb_step: int, log_gif: bool = Fa
         new_pics[0].save(gif_path, format="GIF", save_all=True, optimize=False, append_images=new_pics[1:], duration=200, loop=0)
 
         print("Logging GIF to WandB")
-        if log_gif:
-            wandb.log({"eval/episode_gif": wandb.Video(gif_path, caption="Evaluation Episode", format="gif")}, step=int(wandb_step))
+        wandb.log({"eval/episode_gif": wandb.Video(gif_path, caption="Evaluation Episode", format="gif")}, step=int(wandb_step))
         
     # print(f"Episode {episode} total reward: {episode_reward}")
 def tune(default_config):
