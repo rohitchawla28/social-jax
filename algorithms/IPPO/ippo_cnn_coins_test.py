@@ -684,6 +684,7 @@ def single_run(config):
     # key for the whole run, then split for each seed
     # removed the jax.random.split(rng, config["NUM_SEEDS"]) since we only run 1 seed for now
     rng = jax.random.PRNGKey(config["SEED"])
+    print(f"config seed: {config['SEED']}")
     runner_state = init_jit(rng)
 
     num_evals = 10

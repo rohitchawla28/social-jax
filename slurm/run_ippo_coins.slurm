@@ -54,4 +54,6 @@ export HF_HOME="$BASE/hf"
 mkdir -p "$XDG_CACHE_HOME" "$HF_HOME"
 
 # run
-conda run -n SocialJax python "algorithms/IPPO/ippo_cnn_coins.py"
+conda run -n SocialJax python "algorithms/IPPO/ippo_cnn_coins.py" SEED=30
+conda run -n SocialJax python "algorithms/IPPO/ippo_cnn_coins.py" SEED=31
+conda run -n SocialJax python "algorithms/IPPO/ippo_cnn_coins.py" SEED=32

@@ -34,6 +34,7 @@
 # WandB Params
 "ENTITY": "rohit-chawla28"
 "PROJECT": "socialjax-ippo"
+"WANDB_GROUP": "IPPO-individual"
 "WANDB_MODE" : "online"
 "WANDB_TAGS":
   - INDIVIDUAL_REWARD # COMMON_REWARD
