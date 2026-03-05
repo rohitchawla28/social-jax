@@ -1412,7 +1412,7 @@ class Clean_up(MultiAgentEnv):
             
             # this is actual per-agent reward from the env, BEFORE shared/shaping/SVO/etc, used only for logging/fairness metrics
             # different from the actual optimization target
-            info["raw_reward_individual"] = raw_reward_individual
+            info["raw_reward_individual"] = raw_reward_individual.squeeze()
 
             state_nxt = State(
                 agent_locs=state.agent_locs,
@@ -1437,7 +1437,7 @@ class Clean_up(MultiAgentEnv):
             state_re = _reset_state(key)
 
             state_re = state_re.replace(outer_t=outer_t + 1)
-            state = jax.tree_map(
+            state = jax.tree_util.tree_map(
                 lambda x, y: jnp.where(reset_inner, x, y),
                 state_re,
                 state_nxt,

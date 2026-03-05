@@ -2,7 +2,7 @@
 Based on PureJaxRL & jaxmarl Implementation of PPO
 """
 import sys
-sys.path.append('/home/shuqing/SocialJax')
+# sys.path.append('/home/shuqing/SocialJax')
 import jax
 import jax.numpy as jnp
 import flax.linen as nn
@@ -301,7 +301,15 @@ def make_train(config):
 
                 
                 if config["PARAMETER_SHARING"]:
-                    info = jax.tree_map(lambda x: x.reshape((config["NUM_ACTORS"])), info)
+                    # Incorrect env-major flattening:
+                        # info = jax.tree_util.tree_map(lambda x: x.reshape((config["NUM_ACTORS"])), info)
+                    
+                    # need to transpose to (num_agents, NUM_ENVS) before 
+                    # flattening to match agent-major of obs/reward/done
+                    info = jax.tree_util.tree_map(
+                        lambda x: jnp.transpose(x, (1, 0)).reshape((config["NUM_ACTORS"],)),
+                        info,
+                    )
                     transition = Transition(
                         batchify_dict(done, env.agents, config["NUM_ACTORS"]).squeeze(),
                         action,
@@ -313,11 +321,11 @@ def make_train(config):
                         )
                 else:
                     transition = []
-                    done = [v for v in done.values()]
+                    done_list = [v for v in done.values()]
                     for i in range(env.num_agents):
-                        info_i = {key: jax.tree_map(lambda x: x.reshape((config["NUM_ACTORS"]),1), value[:,i]) for key, value in info.items()}
+                        info_i = {key: jax.tree_util.tree_map(lambda x: x.reshape((config["NUM_ACTORS"]),1), value[:,i]) for key, value in info.items()}
                         transition.append(Transition(
-                            done[i],
+                            done_list[i],
                             env_act[i],
                             value[i],
                             reward[:,i],
@@ -418,20 +426,36 @@ def make_train(config):
                         loss_actor = loss_actor.mean()
                         entropy = pi.entropy().mean()
 
+                        # log critic prediction value as well for analyzing training dynamics
+                        value_mean = value.mean()
+
                         total_loss = (
                             loss_actor
                             + config["VF_COEF"] * value_loss
                             - config["ENT_COEF"] * entropy
                         )
-                        return total_loss, (value_loss, loss_actor, entropy)
+                        return total_loss, (value_loss, loss_actor, entropy, value_mean)
 
 
                     grad_fn = jax.value_and_grad(_loss_fn, has_aux=True)
-                    total_loss, grads = grad_fn(
-                            train_state.params, traj_batch, advantages, targets, network_used
-                        )
+
+                    # changed to actually extract the auxiliary metrics along w/ total_loss
+                    (total_loss, (value_loss, loss_actor, entropy, value_mean)), grads = grad_fn(
+                        train_state.params, traj_batch, advantages, targets, network_used
+                    )
+
+                    # calculate gradient norm for additional training metric
+                    grad_norm = optax.global_norm(grads)
+
                     train_state = train_state.apply_gradients(grads=grads)
-                    return train_state, total_loss
+                    train_metrics = {
+                        "train/total_loss": total_loss,
+                        "train/value_loss": value_loss,
+                        "train/value_mean": value_mean,
+                        "train/entropy": entropy,
+                        "train/grad_norm": grad_norm,
+                    }
+                    return train_state, train_metrics
 
                 train_state, traj_batch, advantages, targets, rng = update_state
                 rng, _rng = jax.random.split(rng)
@@ -461,16 +485,16 @@ def make_train(config):
                     shuffled_batch,
                 )
                 if config["PARAMETER_SHARING"]:
-                    train_state, total_loss = jax.lax.scan(
+                    train_state, train_metrics = jax.lax.scan(
                         lambda state, batch_info: _update_minbatch(state, batch_info, network), train_state, minibatches
                     )
                 else:
-                    train_state, total_loss = jax.lax.scan(
+                    train_state, train_metrics = jax.lax.scan(
                         lambda state, batch_info: _update_minbatch(state, batch_info, network[i]), train_state, minibatches
                     )
 
                 update_state = (train_state, traj_batch, advantages, targets, rng)
-                return update_state, total_loss
+                return update_state, train_metrics
             
             if config["PARAMETER_SHARING"]:
                 update_state = (train_state, traj_batch, advantages, targets, rng)
@@ -479,6 +503,11 @@ def make_train(config):
                 )
                 train_state = update_state[0]
                 metric = traj_batch.info
+
+                # avg the training metrics over epochs and minibatches to get 1 scalar per metric each update_step
+                # this matches their logging granularity
+                train_metric = jax.tree_util.tree_map(lambda x: x.mean(), loss_info)
+                metric = {**metric, **train_metric}
                 rng = update_state[-1]
             else:
                 update_state_dict = []
@@ -491,30 +520,120 @@ def make_train(config):
                     update_state_dict.append(update_state)
                     train_state[i] = update_state[0]
                     metric_i = traj_batch[i].info
-                    metric_i['loss'] = loss_info[0]
+                    train_metric_i = jax.tree_util.tree_map(lambda x: x.mean(), loss_info)
+                    metric_i = {**metric_i, **train_metric_i}
                     metric.append(metric_i)
                     rng = update_state[-1]
                 
             def callback(metric):
-                wandb.log(metric)
+                wandb.log(metric, step=metric["env_step"])
 
             update_step = update_step + 1
-            metric = jax.tree_map(lambda x: x.mean(), metric)
+
+            # REMOVED bc avg across all timesteps wasnt good
+                # write metrics to wandb after every update step / rollout
+                # metric = jax.tree_util.tree_map(lambda x: x.mean(), metric)
+
+            # NOTE: some fields (ex: returned_episode_returns) are episodic and only become non-zero at episode end
+            def _reduce_metric_dict(m):
+                """
+                Reduce per-update metrics for fixed rollouts (1 episode per rollout)
+                - episodic signals (returned_episode_*) -> take last timestep, then mean over actors
+                - per-step signals that represent counts/returns (raw_reward_individual, clean_action_info, cleaned_water)
+                -> reshape to (T, num_agents, NUM_ENVS), sum over time -> episode totals
+                - fairness metrics computed from raw episode returns per agent
+                """
+                episode_keys = ("returned_episode_returns", "returned_episode_lengths", "returned_episode")
+                out = {}
+
+                T = config["NUM_STEPS"]
+                A = env.num_agents
+                E = config["NUM_ENVS"]
+
+                # ---------- raw rewards -> episode returns + fairness ----------
+                if "raw_reward_individual" in m:
+                    raw = m["raw_reward_individual"]  # expected (T, NUM_ACTORS)
+
+                    if raw.ndim == 2:
+                        raw = raw.reshape((T, A, E))
+
+                    ep_return_agent_env = raw.sum(axis=0)          # (A, E)
+                    mean_ep_return_per_agent = ep_return_agent_env.mean(axis=1)   # (A,)
+                    mean_ep_return_team = ep_return_agent_env.sum(axis=0).mean()  # scalar
+
+                    # variance across agents (then avg across envs)
+                    mean_ep_return_variance = ep_return_agent_env.var(axis=0).mean()
+
+                    # has some nonConcreteBooleanIndexError from Jax, so commenting out for now
+                    # pairwise abs diff across agents (upper triangle), then avg across envs
+                    # diff = jnp.abs(ep_return_agent_env[:, None, :] - ep_return_agent_env[None, :, :])  # (A, A, E)
+                    # mask = jnp.triu(jnp.ones((A, A), dtype=bool), k=1)[:, :, None]               # (A, A, 1)
+                    # mean_ep_pairwise_absdiff = diff[mask].mean()
+
+                    for i in range(A):
+                        out[f"rollout/raw_ep_return_agent{i}"] = mean_ep_return_per_agent[i]
+
+                    out["rollout/raw_ep_return_team"] = mean_ep_return_team
+                    out["rollout/raw_ep_return_variance"] = mean_ep_return_variance
+                    # out["rollout/raw_ep_pairwise_absdiff"] = mean_ep_pairwise_absdiff
+
+                # ---------- cleanup-specific per-step counters -> episode totals ----------
+                def _sum_episode_total(key):
+                    if key not in m:
+                        return
+                    x = m[key]  # (T, NUM_ACTORS)
+                    if x.ndim == 2:
+                        x = x.reshape((T, A, E))
+                    ep_total_agent_env = x.sum(axis=0)                  # (A, E)
+                    mean_per_agent = ep_total_agent_env.mean(axis=1)    # (A,)
+                    mean_team = ep_total_agent_env.sum(axis=0).mean()   # scalar
+                    for i in range(A):
+                        out[f"rollout/{key}_agent{i}"] = mean_per_agent[i]
+                    out[f"rollout/{key}_team"] = mean_team
+
+                _sum_episode_total("clean_action_info")
+                _sum_episode_total("cleaned_water")
+
+                # ---------- default handling for other keys ----------
+                for k, v in m.items():
+                    # don't log per-step raw rewards / counters directly (we logged reduced versions above)
+                    if k in ("raw_reward_individual", "clean_action_info", "cleaned_water"):
+                        continue
+
+                    # v usually has shape (T, NUM_ACTORS)
+                    if k in episode_keys:
+                        out[k] = v[-1].mean()
+                    else:
+                        # for non-episodic scalar training losses etc, mean is fine
+                        out[k] = v.mean()
+
+                return out
+            
             if config["PARAMETER_SHARING"]:
-                metric["update_step"] = update_step
-                metric["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
-                # jax.debug.callback(callback, metric)
+                metric = _reduce_metric_dict(metric)
             else:
-                for i in range(env.num_agents):
-                    metric[i]["update_step"] = update_step
-                    metric[i]["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
-                metric = metric[0]
-                # jax.debug.callback(callback, metric)
+                metric = [_reduce_metric_dict(m_i) for m_i in metric]
+                metric = metric[0]  # keep logging structure same as your current script
+
             metric["update_step"] = update_step
             metric["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
-            metric["clean_action_info"] = metric["clean_action_info"] * config["ENV_KWARGS"]["num_inner_steps"]
 
             jax.debug.callback(callback, metric)
+
+            # if config["PARAMETER_SHARING"]:
+            #     metric["update_step"] = update_step
+            #     metric["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
+            # else:
+            #     for i in range(env.num_agents):
+            #         metric[i]["update_step"] = update_step
+            #         metric[i]["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
+            #     metric = metric[0]
+            # metric["update_step"] = update_step
+            # metric["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
+            
+
+            # moving this to the reduce_metric_dict, maybe need to do with eat_own_coins
+            # metric["clean_action_info"] = metric["clean_action_info"] * config["ENV_KWARGS"]["num_inner_steps"]
 
             runner_state = (train_state, env_state, last_obs, update_step, rng)
             return runner_state, metric
@@ -537,6 +656,7 @@ def single_run(config):
         entity=config["ENTITY"],
         project=config["PROJECT"],
         tags=["IPPO", "FF"],
+        group=config["WANDB_GROUP"],
         config=config,
         mode=config["WANDB_MODE"],
         name=f'ippo_cnn_cleanup'
@@ -549,7 +669,7 @@ def single_run(config):
 
     print("** Saving Results **")
     filename = f'{config["ENV_NAME"]}_seed{config["SEED"]}'
-    train_state = jax.tree_map(lambda x: x[0], out["runner_state"][0])
+    train_state = jax.tree_util.tree_map(lambda x: x[0], out["runner_state"][0])
     save_path = f"./checkpoints/individual/{filename}.pkl"
     if config["PARAMETER_SHARING"]:
         save_path = f"./checkpoints/indvidual/{filename}.pkl"
@@ -631,12 +751,12 @@ def evaluate(params, env, save_path, config):
         img = env.render(state)
         pics.append(img)
         
-        print('###################')
-        print(f'Actions: {env_act}')
-        print(f'Reward: {reward}')
+        # print('###################')
+        # print(f'Actions: {env_act}')
+        # print(f'Reward: {reward}')
         # print(f'State: {state.agent_locs}')
         # print(f'State: {state.claimed_indicator_time_matrix}')
-        print("###################")
+        # print("###################")
     
     # 保存GIF
     print(f"Saving Episode GIF")
@@ -716,7 +836,7 @@ def tune(default_config):
         rngs = jax.random.split(rng, config["NUM_SEEDS"])
         train_vjit = jax.jit(jax.vmap(make_train(config)))
         outs = jax.block_until_ready(train_vjit(rngs))
-        train_state = jax.tree_map(lambda x: x[0], outs["runner_state"][0])
+        train_state = jax.tree_util.tree_map(lambda x: x[0], outs["runner_state"][0])
 
         # Evaluate and log
         # params = load_params(train_state.params)
@@ -732,9 +852,10 @@ def tune(default_config):
 
 @hydra.main(version_base=None, config_path="config", config_name="ippo_cnn_cleanup")
 def main(config):
-    if config["TUNE"]:
-        tune(config)
-    else:
-        single_run(config)
+    # if config["TUNE"]:
+    #     tune(config)
+    # else:
+    print(f"Starting single run ippo main with config:\n\n {config}\n\n")
+    single_run(config)
 if __name__ == "__main__":
     main()
