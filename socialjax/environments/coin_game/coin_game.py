@@ -1034,6 +1034,9 @@ class CoinGame(MultiAgentEnv):
             )
             outer_t = state.outer_t
             reset_outer = outer_t == num_outer_steps
+
+            # reset_outer boolean for each agent, and also for the "__all__" key to indicate if the entire environment is done
+            # agents should all have same reset_outer value
             done = {f'{a}': reset_outer for a in self.agents}
             # done = [reset_outer for _ in self.agents]
             done["__all__"] = reset_outer
