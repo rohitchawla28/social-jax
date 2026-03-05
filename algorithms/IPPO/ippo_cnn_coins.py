@@ -954,7 +954,7 @@ def tune(default_config):
     wandb.agent(sweep_id, wrapped_make_train, count=1000)
 
 
-@hydra.main(version_base=None, config_path="config", config_name="ippo_cnn_coins_test_mac")
+@hydra.main(version_base=None, config_path="config", config_name="ippo_cnn_coins")
 def main(config):
     # if config["TUNE"]:
     #     tune(config)
