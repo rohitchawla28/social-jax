@@ -333,7 +333,7 @@ def make_train(config):
                     log_prob,
                     obs_batch,
                     info,
-                    )
+                )
             else:
                 transition = []
                 # changed to done_list from done to not overload the term
@@ -464,6 +464,7 @@ def make_train(config):
                 train_state = train_state.apply_gradients(grads=grads)
                 train_metrics = {
                     "train/total_loss": total_loss,
+                    "train/actor_loss": loss_actor,
                     "train/value_loss": value_loss,
                     "train/value_mean": value_mean,
                     "train/entropy": entropy,
@@ -607,6 +608,7 @@ def make_train(config):
                     continue
                 
                 # v has shape=(T, NUM_ACTORS)
+                # episode_keys: "returned_episode_returns", "returned_episode_lengths", "returned_episode"
                 if k in episode_keys:
                     # since one episode per rollout, last timestep contains episode return value
                     out[k] = v[-1].mean()                    # v[-1].shape=(NUM_ACTORS,), then avg across actors for scalar
@@ -629,6 +631,8 @@ def make_train(config):
             metric = metric[0]
         metric["update_step"] = update_step
         metric["env_step"] = update_step * config["NUM_STEPS"] * config["NUM_ENVS"]
+
+        # this feels like such bad code, why do they avg it and then un-avg it
         metric["eat_own_coins"] = metric["eat_own_coins"] * config["ENV_KWARGS"]["num_inner_steps"]
 
         jax.debug.callback(callback, metric)
@@ -851,13 +855,7 @@ def evaluate(params, env, save_path, config, wandb_step: int, log_gif: bool = Fa
     raw_variance = jnp.var(raw_return_agents)
 
     # pairwise abs diff
-    if env.num_agents == 2:
-        raw_pair_absdiff = jnp.abs(raw_return_agents[0] - raw_return_agents[1])
-    # when num_agents > 2
-        # else:
-        #     diff = jnp.abs(raw_ep_return_agents[:, None] - raw_ep_return_agents[None, :])  # (A, A)
-        #     mask = jnp.triu(jnp.ones((env.num_agents, env.num_agents), dtype=bool), k=1)
-        #     fair_pair_absdiff = diff[mask].mean()
+    raw_pair_absdiff = jnp.abs(raw_return_agents[0] - raw_return_agents[1])
 
     eval_metrics = {}
     for i in range(env.num_agents):
