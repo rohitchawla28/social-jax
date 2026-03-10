@@ -1359,17 +1359,19 @@ class Clean_up(MultiAgentEnv):
 
             # this is actual per-agent reward from the env, BEFORE shared/shaping/SVO/etc, used only for logging
             # different from the actual optimization target
-            raw_reward_individual = jnp.zeros((self.num_agents, 1))
-            raw_reward_individual = jnp.where(apple_matches, 1, raw_reward_individual)
+            raw_reward_individual = jnp.where(apple_matches, 1, jnp.zeros((self.num_agents, 1)))
 
             if self.shared_rewards:
                 rewards = jnp.zeros((self.num_agents, 1))
                 original_rewards = jnp.where(apple_matches, 1, rewards)
 
                 rewards_sum_all_agents = jnp.zeros((self.num_agents, 1))
-                rewards_sum = jnp.sum(original_rewards)
+                rewards_sum = jnp.sum(original_rewards)         # scalar
+
+                # scalar sum is duplicated across all agents
                 rewards_sum_all_agents += rewards_sum
                 rewards = rewards_sum_all_agents
+                # original_rewards seem correct for individual rewards but going to do it my way for consistency with logs/naming
                 info = {
                     "original_rewards": original_rewards.squeeze(),
                     "shaped_rewards": rewards.squeeze(),
