@@ -1,8 +1,49 @@
+# NUM_UPDATES == 1e8 // 100 // 4 = 250,000 ??
+    # QUESTION: is this a typo? should it be 2500 if NUM_STEPS should be 1000? BUT it's in their paper too as NUM_STEPS=100
+
 "LR": 0.001
+
+# QUESTION: why does MAPPO differ so much? is it to match with lower NUM_STEPS so that NUM_UPDATES is much more?
+# QUESTION: is the reason for this related to efficiency/compute? 
+    # Other env-algo pairs for this arg:
+        # IPPO: all envs have NUM_ENVS=256
+        # MAPPO: coins has NUM_ENVS=256, coop_mining has 7, harvest/territory_open have 5, mushrooms/gifts/pd_arena have 4
+        # SVO: all envs have NUM_ENVS=430
 "NUM_ENVS": 4
-"NUM_STEPS": 100
+
+# QUESTION: is NUM_STEPS in MAPPO a typo? and they just copied the configs?
+    # Other env-algo pairs for this arg:
+        # IPPO: all envs have NUM_STEPS=1000 and num_inner_steps=1000 EXCEPT pd_arena and territory open (they have NUM_STEPS=500 and num_inner_steps=1000)
+        # MAPPO: all envs have NUM_STEPS=100 and num_inner_steps=1000 EXCEPT coins and coop_mining (they have NUM_STEPS=1000 and num_inner_steps=1000)
+        # SVO: all envs have NUM_STEPS=1000 and num_inner_steps=1000
+    # Things this affects:
+        # - NUM_UPDATES == 250,000
+        # - MINIBATCH_SIZE == 700 = 28 (NUM_ACTORS) * 100 (NUM_STEPS) // 4 (NUM_MINIBATCHES)
+        #     - this seems okay (at least close to some other values i checked in different env-algo pairings)
+        # - returned_episode_* metrics
+        #     - These metrics only get updated when an episode (1000 steps) ends
+        #         - So they will only update after every 10 rollouts 
+        #     - These full episode metrics then get averaged across the rollout (divided by T=100 steps/rollout) 
+        #         - This just seems like an incorrect calculation to be called episode metrics
+
+        # Training updates are more frequent and noisier since shorter rollouts 
+"NUM_STEPS": 100 
+
+# QUESTION: is TOTAL_TIMESTEPS in MAPPO a typo? in the paper, they say 3e8 for MAPPO cleanup?
+    # Other env-algo pairs for this arg:
+          # IPPO: all envs have 3e8 except coins (1e9)
+          # MAPPO: 1e8 (cleanup, gifts, mushrooms), 3e8 (pd_arena), 1e9 (coins, coop_mining, harvest, territory_open)
+          # SVO: all envs have 2e8
 "TOTAL_TIMESTEPS": 1e8
+
+# UPDATE_EPOCHS = 2 across all env-algo pairs
 "UPDATE_EPOCHS": 2
+
+# QUESTION: why does NUM_MINIBATCHES differ so much in MAPPO?
+    # NUM_MINIBATCHES values in other env-algo pairs:
+          # IPPO: all envs have 500
+          # MAPPO: coins has 64, but 4 for everything else
+          # SVO: all envs have 500
 "NUM_MINIBATCHES": 4
 "GAMMA": 0.99
 "GAE_LAMBDA": 0.95
@@ -34,7 +75,8 @@
 
 # WandB Params
 "ENTITY": "rohit-chawla28"
-"PROJECT": "socialjax-mappo"
+"PROJECT": "socialjax-ippo"
+"WANDB_GROUP": "MAPPO-cleanup"
 "WANDB_MODE" : "online"
 "WANDB_TAGS":
   - COMMON_REWARD # COMMON_REWARD; INDIVIDUAL_REWARD

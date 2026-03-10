@@ -1026,6 +1026,7 @@ class CoinGame(MultiAgentEnv):
             # if inner episode is done, return start state for next game
             state_re = _reset_state(key)
 
+            # outer_t is init at 0, when it becomes 1 we are done with the episode 
             state_re = state_re.replace(outer_t=outer_t + 1)
             state = jax.tree_util.tree_map(
                 lambda x, y: jnp.where(reset_inner, x, y),
