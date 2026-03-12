@@ -27,7 +27,7 @@
         #         - This just seems like an incorrect calculation to be called episode metrics
 
         # Training updates are more frequent and noisier since shorter rollouts 
-"NUM_STEPS": 100 
+"NUM_STEPS": 1000
 
 # QUESTION: is TOTAL_TIMESTEPS in MAPPO a typo? in the paper, they say 3e8 for MAPPO cleanup?
     # Other env-algo pairs for this arg:
