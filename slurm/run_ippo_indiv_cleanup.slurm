@@ -56,3 +56,4 @@ mkdir -p "$XDG_CACHE_HOME" "$HF_HOME"
 # run
 conda run -n SocialJax python "algorithms/IPPO/ippo_cnn_cleanup.py" SEED=30
 conda run -n SocialJax python "algorithms/IPPO/ippo_cnn_cleanup.py" SEED=31
+conda run -n SocialJax python "algorithms/IPPO/ippo_cnn_cleanup.py" SEED=32

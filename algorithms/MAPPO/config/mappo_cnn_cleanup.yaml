@@ -30,11 +30,12 @@
 "NUM_STEPS": 1000
 
 # QUESTION: is TOTAL_TIMESTEPS in MAPPO a typo? in the paper, they say 3e8 for MAPPO cleanup?
+    # just changing to 3e8 for now to do same as paper
     # Other env-algo pairs for this arg:
           # IPPO: all envs have 3e8 except coins (1e9)
           # MAPPO: 1e8 (cleanup, gifts, mushrooms), 3e8 (pd_arena), 1e9 (coins, coop_mining, harvest, territory_open)
           # SVO: all envs have 2e8
-"TOTAL_TIMESTEPS": 1e8
+"TOTAL_TIMESTEPS": 3e8
 
 # UPDATE_EPOCHS = 2 across all env-algo pairs
 "UPDATE_EPOCHS": 2
