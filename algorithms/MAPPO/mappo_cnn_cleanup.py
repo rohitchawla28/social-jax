@@ -695,7 +695,7 @@ def single_run(config):
             save_path=None,
             config=config,
             wandb_step=env_step,
-            log_gif=False
+            log_gif=True
         )
     
     # REMAINDER CHUNK
@@ -751,66 +751,73 @@ def load_params(load_path):
 
 def evaluate(params, env, save_path, config, wandb_step: int, log_gif: bool = False):
     rng = jax.random.PRNGKey(0)
-    
-    rng, _rng = jax.random.split(rng)
-    obs, state = env.reset(_rng)
-    done = False
 
-    # eval isn't full episode if GIF_NUM_FRAMES < num_inner_steps
-    raw_return_agents = jnp.zeros((env.num_agents,), dtype=jnp.float32)
-    # optional: actual optimization-target team return from env reward signal
-    return_team = 0.0
-    
+    eval_num_episodes = config["EVAL_NUM_EPISODES"]
+    network = Actor(action_dim=env.action_space().n, activation=config["ACTIVATION"])
+
+    raw_return_agents_sum = jnp.zeros((env.num_agents,), dtype=jnp.float32)
+    raw_return_team_sum = 0.0
+    raw_variance_sum = 0.0
+    opt_tgt_return_team_sum = 0.0
+
     pics = []
-    img = env.render(state)
-    pics.append(img)
     root_dir = f"evaluation/cleanup"
     path = Path(root_dir + "/state_pics")
     path.mkdir(parents=True, exist_ok=True)
 
-    for o_t in range(config["GIF_NUM_FRAMES"]):
-        # 获取所有智能体的观察
-        # print(o_t)
-        obs_batch = jnp.stack([obs[a] for a in env.agents]).reshape(-1, *env.observation_space()[0].shape)
-
-        # 使用模型选择动作
-        network = Actor(action_dim=env.action_space().n, activation=config["ACTIVATION"])  # 使用与训练时相同的参数
-        pi= network.apply(params, obs_batch)
+    for episode_idx in range(eval_num_episodes):
         rng, _rng = jax.random.split(rng)
-        actions = pi.sample(seed=_rng)
-        
-        # 转换动作格式
-        env_act = {k: v.squeeze() for k, v in unbatchify(
-            actions, env.agents, 1, env.num_agents
-        ).items()}
-        
-        # 执行动作
-        rng, _rng = jax.random.split(rng)
-        obs, state, reward, done, info = env.step(_rng, state, [v.item() for v in env_act.values()])
-        done = done["__all__"]
+        obs, state = env.reset(_rng)
+        done = False
 
-        # ==== EVAL METRICS ====
-        raw_step = info["raw_reward_individual"]  # shape (n_agents,)
-        raw_return_agents = raw_return_agents + raw_step
-        # changed to mean instead of sum because shared_reward (sum) already copied across all agents
-        return_team += float(reward.mean())
-        
-        # 记录结果
-        # episode_reward += sum(reward.values())
-        
-        # 渲染
-        img = env.render(state)
-        pics.append(img)
-        
-        # print('###################')
-        # print(f'Actions: {env_act}')
-        # print(f'Reward: {reward}')
-        # print(f'State: {state.agent_locs}')
-        # print("###################")
+        episode_raw_return_agents = jnp.zeros((env.num_agents,), dtype=jnp.float32)
+        episode_return_team = 0.0
+        episode_pics = []
+
+        # currently only logging GIF for first episode
+        if log_gif and episode_idx == 0:
+            episode_pics.append(env.render(state))
+
+        for _ in range(config["NUM_STEPS"]):
+            obs_batch = jnp.stack([obs[a] for a in env.agents]).reshape(-1, *env.observation_space()[0].shape)
+
+            pi = network.apply(params, obs_batch)
+            rng, _rng = jax.random.split(rng)
+            actions = pi.sample(seed=_rng)
+
+            env_act = {k: v.squeeze() for k, v in unbatchify(
+                actions, env.agents, 1, env.num_agents
+            ).items()}
+
+            rng, _rng = jax.random.split(rng)
+            obs, state, reward, done, info = env.step(
+                _rng, state, [v.item() for v in env_act.values()]
+            )
+            done = done["__all__"]
+
+            # ======= EVAL METRICS ======
+            raw_step = info["raw_reward_individual"] # shape: (num_agents,)
+            episode_raw_return_agents = episode_raw_return_agents + raw_step
+            # shared reward is copied across agents, so the mean is the team optimization target
+            episode_return_team += float(reward.mean())
+
+            # add episode frame for GIF
+            if log_gif and episode_idx == 0:
+                episode_pics.append(env.render(state))
+
+        raw_return_agents_sum += episode_raw_return_agents
+        raw_return_team_sum += episode_raw_return_agents.sum()
+        raw_variance_sum += jnp.var(episode_raw_return_agents)
+        opt_tgt_return_team_sum += float(episode_return_team)
+
+        if log_gif and episode_idx == 0:
+            pics = episode_pics
 
     # ====== CALCULATE / LOG EVAL METRICS =======
-    raw_return_team = raw_return_agents.sum()
-    raw_variance = jnp.var(raw_return_agents)
+    raw_return_agents = raw_return_agents_sum / eval_num_episodes
+    raw_return_team = raw_return_team_sum / eval_num_episodes
+    raw_variance = raw_variance_sum / eval_num_episodes
+    return_team = opt_tgt_return_team_sum / eval_num_episodes
 
     # TODO: some Jax boolean index error
     # diff = jnp.abs(raw_return_agents[:, None] - raw_return_agents[None, :])  # (A, A)
@@ -824,6 +831,7 @@ def evaluate(params, env, save_path, config, wandb_step: int, log_gif: bool = Fa
     eval_metrics["eval/raw_return_variance"] = float(raw_variance)
     # eval_metrics["eval/raw_pairwise_absdiff"] = float(raw_pair_absdiff)
     eval_metrics["eval/opt_tgt_return_team"] = float(return_team)
+    eval_metrics["eval/episodes_averaged"] = eval_num_episodes
 
     wandb.log(eval_metrics, step=int(wandb_step))
 

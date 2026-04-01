@@ -5,7 +5,7 @@
 #SBATCH -N 1
 #SBATCH -n 1
 #SBATCH --cpus-per-task=2               # good for runtime orchestration?
-#SBATCH -t 18:00:00
+#SBATCH -t 24:00:00
 #SBATCH -o /scratch/11264/rohitchawla28/scr_reproduce_socialjax/slurm/logs/mappo_cleanup.%j.out
 #SBATCH -e /scratch/11264/rohitchawla28/scr_reproduce_socialjax/slurm/logs/mappo_cleanup.%j.err
 
@@ -54,6 +54,5 @@ export HF_HOME="$BASE/hf"
 mkdir -p "$XDG_CACHE_HOME" "$HF_HOME"
 
 # run
+# MAKE SURE TO CHANGE SEEDS FOR EACH SCRIPT
 conda run -n SocialJax python "algorithms/MAPPO/mappo_cnn_cleanup.py" SEED=30
-conda run -n SocialJax python "algorithms/MAPPO/mappo_cnn_cleanup.py" SEED=31
-conda run -n SocialJax python "algorithms/MAPPO/mappo_cnn_cleanup.py" SEED=32
