@@ -59,6 +59,7 @@
 
 "REWARD": "individual" # individual; common
 "GIF_NUM_FRAMES": 250
+"EVAL_NUM_EPISODES": 10
 "PARAMETER_SHARING": True
 
 # WandB Params
