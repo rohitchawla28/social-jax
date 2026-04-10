@@ -1,0 +1,102 @@
+# Local CPU test config for HMASD cleanup.
+# Designed for M1 MacBook Pro (CPU JAX) — as small as possible while exercising every code path.
+#
+# Key reductions vs hmasd_cnn_cleanup.yaml:
+#   NUM_ENVS:        32   → 2     (memory)
+#   NUM_STEPS:       1000 → 25    (minimum: must equal SKILL_INTERVAL so SKILL_STEPS=1)
+#   num_inner_steps: 1000 → 25    (matches NUM_STEPS so episodes actually terminate in eval)
+#   TOTAL_TIMESTEPS:  3e8 → 50    (NUM_UPDATES=1; chunk_updates=max(1,0)=1 → still runs
+#                                  10 eval cycles exactly like production, per MAPPO test pattern)
+#   L_NUM_MINIBATCHES:  4 → 1     (25*14=350 and 25*2=50, only common divisors are 1,2,5,10;
+#                                  use 1 for simplicity — loop structure still exercised)
+#   L_UPDATE_EPOCHS:    2 → 1
+#   H_UPDATE_EPOCHS:   15 → 1
+#   D_EPOCH:           15 → 1
+#   EVAL_NUM_EPISODES: 10 → 1
+#   GIF_NUM_FRAMES:   250 → 25    (matches num_inner_steps)
+#
+# What is NOT changed (kept identical to HPC config):
+#   - SKILL_INTERVAL, N_Z_TEAM, N_Z_INDI, all lambda values
+#   - All learning rates, clip eps, gamma, gae lambda, grad norms
+#   - H_NUM_MINIBATCHES=1, D_NUM_MINIBATCHES=1
+#   - Transformer: N_BLOCK, N_EMBD, N_HEAD, HIDDEN_SIZE
+#
+# Verification targets:
+#   1. init_jit runs (all 5 networks init + env reset)
+#   2. chunk_jit runs (nested scan: 1 outer x 25 inner — exercises full scan path)
+#   3. All 3 PPO/disc updates complete per chunk without NaN
+#   4. evaluate() runs hierarchical eval (coordinator at step 0, actor for 25 steps, GRU reset on done)
+#   5. 10 chunk evals + 1 final = 11 evaluate() calls, all log to WandB
+#   6. GIF saved and logged at each eval call
+
+"ENV_NAME": "clean_up"
+"ENV_KWARGS":
+  "num_agents": 7
+  "num_inner_steps": 25    # matches NUM_STEPS so episodes terminate naturally during eval
+  "shared_rewards": False
+  "cnn": True
+  "jit": True
+
+"TOTAL_TIMESTEPS": 50      # NUM_UPDATES = 50/25/2 = 1; still runs 10 eval cycles (chunk_updates=max(1,0)=1)
+"NUM_ENVS": 2
+"NUM_STEPS": 25            # SKILL_STEPS = 25/25 = 1 (minimum viable)
+"SKILL_INTERVAL": 25
+"SEED": 30
+"NUM_SEEDS": 1
+"ACTIVATION": "relu"
+"GIF_NUM_FRAMES": 25       # matches num_inner_steps
+"EVAL_NUM_EPISODES": 1
+
+# Skill dimensions (unchanged)
+"N_Z_TEAM": 3
+"N_Z_INDI": 3
+
+# Intrinsic reward coefficients (unchanged)
+"LAMBDA_ENV": 100
+"LAMBDA_TEAM": 0.1
+"LAMBDA_INDI": 0.1
+
+# Low-level PPO
+"L_LR": 5e-4
+"L_UPDATE_EPOCHS": 1
+"L_NUM_MINIBATCHES": 1     # 25*14=350 and 25*2=50; use 1 (loop still exercised)
+"L_GAMMA": 0.99
+"L_GAE_LAMBDA": 0.95
+"L_CLIP_EPS": 0.2
+"L_ENT_COEF": 0.01
+"L_VF_COEF": 0.5
+"L_MAX_GRAD_NORM": 0.5
+
+# High-level PPO (transformer)
+"H_LR": 5e-4
+"H_UPDATE_EPOCHS": 1
+"H_NUM_MINIBATCHES": 1
+"H_GAMMA": 0.99
+"H_GAE_LAMBDA": 0.95
+"H_CLIP_EPS": 0.2
+"H_ENT_COEF": 0.01
+"H_VF_COEF": 1.0
+"H_MAX_GRAD_NORM": 10.0
+
+# Transformer (unchanged)
+"N_BLOCK": 1
+"N_EMBD": 64
+"N_HEAD": 1
+"HIDDEN_SIZE": 64
+
+# Discriminator
+"D_TEAM_LR": 5e-4
+"D_INDI_LR": 5e-4
+"D_EPOCH": 1
+"D_NUM_MINIBATCHES": 1
+"D_MAX_GRAD_NORM": 10.0
+
+# WandB
+"ENTITY": "rohit-chawla28"
+"PROJECT": "socialjax-ippo"
+"WANDB_GROUP": "HMASD-cleanup-local"
+"WANDB_MODE": "online"
+"WANDB_TAGS":
+  - HMASD
+  - INDIVIDUAL_REWARD
+  - LOCAL_TEST

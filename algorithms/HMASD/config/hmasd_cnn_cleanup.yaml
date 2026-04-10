@@ -17,6 +17,7 @@
 "NUM_SEEDS": 1
 "ACTIVATION": "relu"
 "GIF_NUM_FRAMES": 250
+"EVAL_NUM_EPISODES": 10
 
 # Skill dimensions
 "N_Z_TEAM": 3
