@@ -73,6 +73,7 @@
 
 "REWARD": "MAPPO" # individual; common
 "GIF_NUM_FRAMES": 250
+"EVAL_NUM_EPISODES": 10
 
 # WandB Params
 "ENTITY": "rohit-chawla28"
