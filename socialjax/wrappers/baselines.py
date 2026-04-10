@@ -57,6 +57,8 @@ class LogWrapper(JaxMARLWrapper):
     """
 
     def __init__(self, env: MultiAgentEnv, replace_info: bool = False):
+        # the specific env (ex: CoinGame) is passed in
+        # super().__init__ refers to JaxMARLWrapper, sets self._env to the CoinGame arg
         super().__init__(env)
         self.replace_info = replace_info
 

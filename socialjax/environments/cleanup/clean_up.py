@@ -1357,14 +1357,21 @@ class Clean_up(MultiAgentEnv):
             new_re_locs = jnp.where(reborn_players.any(), new_re_locs, state.agent_locs)
             state = state.replace(reborn_locs=new_re_locs)
 
+            # this is actual per-agent reward from the env, BEFORE shared/shaping/SVO/etc, used only for logging
+            # different from the actual optimization target
+            raw_reward_individual = jnp.where(apple_matches, 1, jnp.zeros((self.num_agents, 1)))
+
             if self.shared_rewards:
                 rewards = jnp.zeros((self.num_agents, 1))
                 original_rewards = jnp.where(apple_matches, 1, rewards)
 
                 rewards_sum_all_agents = jnp.zeros((self.num_agents, 1))
-                rewards_sum = jnp.sum(original_rewards)
+                rewards_sum = jnp.sum(original_rewards)         # scalar
+
+                # scalar sum is duplicated across all agents
                 rewards_sum_all_agents += rewards_sum
                 rewards = rewards_sum_all_agents
+                # original_rewards seem correct for individual rewards but going to do it my way for consistency with logs/naming
                 info = {
                     "original_rewards": original_rewards.squeeze(),
                     "shaped_rewards": rewards.squeeze(),
@@ -1405,6 +1412,10 @@ class Clean_up(MultiAgentEnv):
             info["clean_action_info"] = jnp.where(actions == Actions.zap_clean, 1, 0).squeeze()
             info["cleaned_water"] = jnp.array([len(state.potential_dirt_and_dirt_label) - dirtCount] * self.num_agents).squeeze() 
             
+            # this is actual per-agent reward from the env, BEFORE shared/shaping/SVO/etc, used only for logging/fairness metrics
+            # different from the actual optimization target
+            info["raw_reward_individual"] = raw_reward_individual.squeeze()
+
             state_nxt = State(
                 agent_locs=state.agent_locs,
                 agent_invs=state.agent_invs,
@@ -1428,7 +1439,7 @@ class Clean_up(MultiAgentEnv):
             state_re = _reset_state(key)
 
             state_re = state_re.replace(outer_t=outer_t + 1)
-            state = jax.tree_map(
+            state = jax.tree_util.tree_map(
                 lambda x, y: jnp.where(reset_inner, x, y),
                 state_re,
                 state_nxt,
