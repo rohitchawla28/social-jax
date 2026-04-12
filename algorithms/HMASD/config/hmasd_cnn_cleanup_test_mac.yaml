@@ -31,7 +31,7 @@
 "ENV_KWARGS":
   "num_agents": 7
   "num_inner_steps": 1000
-  "shared_rewards": False
+  "shared_rewards": True
   "cnn": True
   "jit": True
 
@@ -92,8 +92,8 @@
 # WandB
 "ENTITY": "rohit-chawla28"
 "PROJECT": "socialjax-ippo"
-"WANDB_GROUP": "HMASD-cleanup"
+"WANDB_GROUP": "HMASD-cleanup-test-mac"
 "WANDB_MODE": "disabled"
 "WANDB_TAGS":
   - HMASD
-  - INDIVIDUAL_REWARD
+  - COMMON_REWARD

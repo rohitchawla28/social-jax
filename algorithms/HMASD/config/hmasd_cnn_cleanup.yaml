@@ -5,7 +5,7 @@
 "ENV_KWARGS":
   "num_agents": 7
   "num_inner_steps": 1000
-  "shared_rewards": False   # Individual rewards for HMASD
+  "shared_rewards": True    # Shared reward matching original HMASD/Overcooked setup
   "cnn": True
   "jit": True
 
@@ -25,19 +25,19 @@
 
 # Intrinsic reward coefficients
 "LAMBDA_ENV": 100
-"LAMBDA_TEAM": 0.1
-"LAMBDA_INDI": 0.1
+"LAMBDA_TEAM": 1.0    # from overcooked_cramped.sh (reference default lambda_env=1 is different)
+"LAMBDA_INDI": 0.5    # from overcooked_cramped.sh
 
 # Low-level PPO (actor/critic)
 "L_LR": 5e-4
-"L_UPDATE_EPOCHS": 2
-"L_NUM_MINIBATCHES": 4
+"L_UPDATE_EPOCHS": 15  # matches reference ppo_epoch=15 (same for both levels)
+"L_NUM_MINIBATCHES": 1  # matches reference l_num_mini_batch=1
 "L_GAMMA": 0.99
 "L_GAE_LAMBDA": 0.95
 "L_CLIP_EPS": 0.2
 "L_ENT_COEF": 0.01
-"L_VF_COEF": 0.5
-"L_MAX_GRAD_NORM": 0.5
+"L_VF_COEF": 1.0       # matches reference l_value_loss_coef=1
+"L_MAX_GRAD_NORM": 10.0 # matches reference l_max_grad_norm=10.0
 
 # High-level PPO (coordinator/transformer)
 "H_LR": 5e-4
@@ -70,4 +70,4 @@
 "WANDB_MODE": "online"
 "WANDB_TAGS":
   - HMASD
-  - INDIVIDUAL_REWARD
+  - COMMON_REWARD

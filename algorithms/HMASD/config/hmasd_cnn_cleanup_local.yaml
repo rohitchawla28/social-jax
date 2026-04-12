@@ -33,7 +33,7 @@
 "ENV_KWARGS":
   "num_agents": 7
   "num_inner_steps": 25    # matches NUM_STEPS so episodes terminate naturally during eval
-  "shared_rewards": False
+  "shared_rewards": True    # Shared reward matching original HMASD/Overcooked setup
   "cnn": True
   "jit": True
 
@@ -53,19 +53,19 @@
 
 # Intrinsic reward coefficients (unchanged)
 "LAMBDA_ENV": 100
-"LAMBDA_TEAM": 0.1
-"LAMBDA_INDI": 0.1
+"LAMBDA_TEAM": 1.0    # from overcooked_cramped.sh
+"LAMBDA_INDI": 0.5    # from overcooked_cramped.sh
 
 # Low-level PPO
 "L_LR": 5e-4
-"L_UPDATE_EPOCHS": 1
-"L_NUM_MINIBATCHES": 1     # 25*14=350 and 25*2=50; use 1 (loop still exercised)
+"L_UPDATE_EPOCHS": 1       # reduced from 15 for local speed only
+"L_NUM_MINIBATCHES": 1     # matches reference; also required by local batch size
 "L_GAMMA": 0.99
 "L_GAE_LAMBDA": 0.95
 "L_CLIP_EPS": 0.2
 "L_ENT_COEF": 0.01
-"L_VF_COEF": 0.5
-"L_MAX_GRAD_NORM": 0.5
+"L_VF_COEF": 1.0           # matches reference l_value_loss_coef=1
+"L_MAX_GRAD_NORM": 10.0    # matches reference l_max_grad_norm=10.0
 
 # High-level PPO (transformer)
 "H_LR": 5e-4
@@ -94,9 +94,9 @@
 # WandB
 "ENTITY": "rohit-chawla28"
 "PROJECT": "socialjax-ippo"
-"WANDB_GROUP": "HMASD-cleanup-local"
+"WANDB_GROUP": "HMASD-cleanup-test-mac"
 "WANDB_MODE": "online"
 "WANDB_TAGS":
   - HMASD
-  - INDIVIDUAL_REWARD
+  - COMMON_REWARD
   - LOCAL_TEST

@@ -843,8 +843,6 @@ def evaluate(actor_params, coord_params, env, config, wandb_step: int, log_gif: 
         n_block=config["N_BLOCK"],
         n_embd=config["N_EMBD"],
         n_head=config["N_HEAD"],
-        obs_shape=obs_shape,
-        ws_shape=(H, W, C_ws),
         activation=config["ACTIVATION"],
     )
 
@@ -928,8 +926,12 @@ def evaluate(actor_params, coord_params, env, config, wandb_step: int, log_gif: 
             # Accumulate raw individual rewards
             raw_step = info["raw_reward_individual"]  # (n_agents,) from cleanup env
             episode_raw_return_agents = episode_raw_return_agents + raw_step
-            # reward is (n_agents,); mean gives the optimization-target team signal (matches MAPPO)
-            episode_return_team += float(reward.mean())
+            # opt_tgt: shared reward → mean (same value copied across agents);
+            #          individual reward → sum (matches IPPO pattern)
+            if config["ENV_KWARGS"]["shared_rewards"]:
+                episode_return_team += float(reward.mean())
+            else:
+                episode_return_team += float(reward.sum())
 
             # GRU reset on episode done only — NOT at skill interval boundaries
             rnn_state = rnn_state * (1.0 - float(done))
