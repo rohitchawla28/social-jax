@@ -1064,6 +1064,10 @@ def single_run(config):
 
 @hydra.main(version_base=None, config_path="config", config_name="hmasd_cnn_cleanup")
 def main(config):
+    print("Starting HMASD training with config:")
+    for key, value in config.items():
+        print(f"  {key}: {value}")
+        
     single_run(config)
 
 

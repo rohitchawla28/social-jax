@@ -1,0 +1,76 @@
+# HMASD MEDIUM NUM_ENVS change config for cleanup
+# Smaller config for testing the OOM error, but only halving NUM_ENVS
+# This tests whether rollout size is the main issue.
+# Changes from hmasd_cnn_cleanup.yaml:
+    # NUM_ENVS = 32 -> 16
+
+"ENV_NAME": "clean_up"
+"ENV_KWARGS":
+  "num_agents": 7
+  "num_inner_steps": 1000
+  "shared_rewards": True
+  "cnn": True
+  "jit": True
+
+"TOTAL_TIMESTEPS": 3e8
+"NUM_ENVS": 16        # CHANGED
+"NUM_STEPS": 1000          # total steps per update = SKILL_STEPS * SKILL_INTERVAL
+"SKILL_INTERVAL": 25       # low-level steps per skill assignment
+"SEED": 30
+"NUM_SEEDS": 1
+"ACTIVATION": "relu"
+"GIF_NUM_FRAMES": 250
+"EVAL_NUM_EPISODES": 10
+
+# Skill dimensions
+"N_Z_TEAM": 3
+"N_Z_INDI": 3
+
+# Intrinsic reward coefficients
+"LAMBDA_ENV": 100
+"LAMBDA_TEAM": 1.0    # from overcooked_cramped.sh (reference default lambda_env=1 is different)
+"LAMBDA_INDI": 0.5    # from overcooked_cramped.sh
+
+# Low-level PPO (actor/critic)
+"L_LR": 5e-4
+"L_UPDATE_EPOCHS": 15
+"L_NUM_MINIBATCHES": 1
+"L_GAMMA": 0.99
+"L_GAE_LAMBDA": 0.95
+"L_CLIP_EPS": 0.2
+"L_ENT_COEF": 0.01
+"L_VF_COEF": 1.0       # matches reference l_value_loss_coef=1
+"L_MAX_GRAD_NORM": 10.0 # matches reference l_max_grad_norm=10.0
+
+# High-level PPO (coordinator/transformer)
+"H_LR": 5e-4
+"H_UPDATE_EPOCHS": 15
+"H_NUM_MINIBATCHES": 1
+"H_GAMMA": 0.99
+"H_GAE_LAMBDA": 0.95
+"H_CLIP_EPS": 0.2
+"H_ENT_COEF": 0.01
+"H_VF_COEF": 1.0
+"H_MAX_GRAD_NORM": 10.0
+
+# Transformer (SkillCoordinator)
+"N_BLOCK": 1
+"N_EMBD": 64
+"N_HEAD": 1
+"HIDDEN_SIZE": 64
+
+# Discriminator
+"D_TEAM_LR": 5e-4
+"D_INDI_LR": 5e-4
+"D_EPOCH": 15
+"D_NUM_MINIBATCHES": 1
+"D_MAX_GRAD_NORM": 10.0
+
+# WandB
+"ENTITY": "rohit-chawla28"
+"PROJECT": "socialjax-ippo"
+"WANDB_GROUP": "HMASD-cleanup"
+"WANDB_MODE": "online"
+"WANDB_TAGS":
+  - HMASD
+  - COMMON_REWARD
