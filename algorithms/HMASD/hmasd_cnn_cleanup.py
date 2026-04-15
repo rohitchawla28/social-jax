@@ -1062,12 +1062,12 @@ def single_run(config):
 # Hydra entry point
 # ============================================================================
 
-@hydra.main(version_base=None, config_path="config", config_name="hmasd_cnn_cleanup")
+@hydra.main(version_base=None, config_path="config", config_name="hmasd_cnn_cleanup_mini")
 def main(config):
     print("Starting HMASD training with config:")
     for key, value in config.items():
         print(f"  {key}: {value}")
-        
+
     single_run(config)
 
 
