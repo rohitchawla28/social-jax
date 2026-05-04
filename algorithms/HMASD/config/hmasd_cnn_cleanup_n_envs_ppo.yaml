@@ -1,0 +1,83 @@
+# HMASD n_envs_ppo config: NUM_ENVS=16 with MAPPO-matched PPO hyperparameters
+# Base: med_n_envs (NUM_ENVS=16)
+# Changes from med_n_envs:
+#   L_LR: 5e-4 -> 1e-3, L_UPDATE_EPOCHS: 15 -> 2, L_NUM_MINIBATCHES: 1 -> 4
+#   L_VF_COEF: 1.0 -> 0.5, L_MAX_GRAD_NORM: 10.0 -> 0.5
+#   H_LR: 5e-4 -> 1e-3, H_UPDATE_EPOCHS: 15 -> 2
+#   H_VF_COEF: 1.0 -> 0.5, H_MAX_GRAD_NORM: 10.0 -> 0.5
+#   ANNEAL_LR: True (H_ and L_ both anneal; H_NUM_MINIBATCHES stays 1, code doesn't split H batches)
+# D_ left at reference defaults (cross-entropy classifier, no MAPPO equivalent)
+# Expected ~7x faster than med_n_envs (~6-7 hrs for 3e8 steps)
+
+"ENV_NAME": "clean_up"
+"ENV_KWARGS":
+  "num_agents": 7
+  "num_inner_steps": 1000
+  "shared_rewards": True
+  "cnn": True
+  "jit": True
+
+"TOTAL_TIMESTEPS": 3e8
+"NUM_ENVS": 16
+"NUM_STEPS": 1000
+"SKILL_INTERVAL": 25
+"SEED": 30
+"NUM_SEEDS": 1
+"ACTIVATION": "relu"
+"GIF_NUM_FRAMES": 250
+"EVAL_NUM_EPISODES": 10
+
+# Skill dimensions
+"N_Z_TEAM": 3
+"N_Z_INDI": 3
+
+# Intrinsic reward coefficients
+"LAMBDA_ENV": 100
+"LAMBDA_TEAM": 1.0
+"LAMBDA_INDI": 0.5
+
+# Low-level PPO — matched to MAPPO socialJax cleanup config
+"ANNEAL_LR": True
+"L_LR": 1e-3
+"L_UPDATE_EPOCHS": 2
+"L_NUM_MINIBATCHES": 4
+"L_GAMMA": 0.99
+"L_GAE_LAMBDA": 0.95
+"L_CLIP_EPS": 0.2
+"L_ENT_COEF": 0.01
+"L_VF_COEF": 0.5
+"L_MAX_GRAD_NORM": 0.5
+
+# High-level PPO (coordinator/transformer) — matched to MAPPO where applicable
+# H_NUM_MINIBATCHES stays 1: the H update code doesn't implement batch splitting
+"H_LR": 1e-3
+"H_UPDATE_EPOCHS": 2
+"H_NUM_MINIBATCHES": 1
+"H_GAMMA": 0.99
+"H_GAE_LAMBDA": 0.95
+"H_CLIP_EPS": 0.2
+"H_ENT_COEF": 0.01
+"H_VF_COEF": 0.5
+"H_MAX_GRAD_NORM": 0.5
+
+# Transformer (SkillCoordinator)
+"N_BLOCK": 1
+"N_EMBD": 64
+"N_HEAD": 1
+"HIDDEN_SIZE": 64
+
+# Discriminator — HMASD-specific
+"D_TEAM_LR": 5e-4
+"D_INDI_LR": 5e-4
+"D_EPOCH": 15
+"D_NUM_MINIBATCHES": 1
+"D_MAX_GRAD_NORM": 10.0
+
+# WandB
+"ENTITY": "rohit-chawla28"
+"PROJECT": "socialjax-ippo"
+"WANDB_GROUP": "HMASD-cleanup"
+"WANDB_MODE": "online"
+"WANDB_TAGS":
+  - HMASD
+  - COMMON_REWARD

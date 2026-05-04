@@ -1,10 +1,10 @@
 # HMASD L_NUM_MINIBATCH change config for cleanup
 # This isolates whether minibatching and update epochs fix memory.
 # Changes from hmasd_cnn_cleanup.yaml:
-    # L_NUM_MINIBATCHES = 16
-    # L_UPDATE_EPOCHS = 2
-    # H_UPDATE_EPOCHS = 2
-    # D_EPOCH = 2
+    # L_NUM_MINIBATCHES = 16 (from 1)
+    # L_UPDATE_EPOCHS = 2 (from 15)
+    # H_UPDATE_EPOCHS = 2 (from 15)
+    # D_EPOCH = 2 (from 15)
 
 "ENV_NAME": "clean_up"
 "ENV_KWARGS":

@@ -187,20 +187,35 @@ def make_train(config):
                 optax.adam(lr, eps=1e-5),
             )
 
+        if config.get("ANNEAL_LR", False):
+            # Linear LR decay matching MAPPO convention: anneals over NUM_UPDATES outer iterations.
+            # count is gradient steps; divide by (minibatches * epochs) to convert to update count.
+            def _l_schedule(count):
+                frac = 1.0 - (count // (config["L_NUM_MINIBATCHES"] * config["L_UPDATE_EPOCHS"])) / config["NUM_UPDATES"]
+                return config["L_LR"] * frac
+            def _h_schedule(count):
+                frac = 1.0 - (count // (config["H_NUM_MINIBATCHES"] * config["H_UPDATE_EPOCHS"])) / config["NUM_UPDATES"]
+                return config["H_LR"] * frac
+            l_lr = _l_schedule
+            h_lr = _h_schedule
+        else:
+            l_lr = config["L_LR"]
+            h_lr = config["H_LR"]
+
         actor_ts = TrainState.create(
             apply_fn=actor.apply,
             params=actor_params,
-            tx=_make_tx(config["L_LR"], config["L_MAX_GRAD_NORM"]),
+            tx=_make_tx(l_lr, config["L_MAX_GRAD_NORM"]),
         )
         critic_ts = TrainState.create(
             apply_fn=critic.apply,
             params=critic_params,
-            tx=_make_tx(config["L_LR"], config["L_MAX_GRAD_NORM"]),
+            tx=_make_tx(l_lr, config["L_MAX_GRAD_NORM"]),
         )
         coord_ts = TrainState.create(
             apply_fn=coord.apply,
             params=coord_params,
-            tx=_make_tx(config["H_LR"], config["H_MAX_GRAD_NORM"]),
+            tx=_make_tx(h_lr, config["H_MAX_GRAD_NORM"]),
         )
         team_disc_ts = TrainState.create(
             apply_fn=team_disc.apply,

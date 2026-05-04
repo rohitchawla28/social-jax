@@ -55,4 +55,5 @@ mkdir -p "$XDG_CACHE_HOME" "$HF_HOME"
 
 # run
 # MAKE SURE TO CHANGE SEEDS FOR EACH SCRIPT
-conda run -n SocialJax python "algorithms/HMASD/hmasd_cnn_cleanup.py" --config-name hmasd_cnn_cleanup SEED=30
+# hydra.run.dir=. prevents timestamped output dir collision when multiple jobs start at the same second
+conda run -n SocialJax python "algorithms/HMASD/hmasd_cnn_cleanup.py" --config-name hmasd_cnn_cleanup SEED=30 "hydra.run.dir=."

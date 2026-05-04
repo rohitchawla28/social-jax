@@ -20,6 +20,7 @@
 #   - All learning rates, clip eps, gamma, gae lambda, grad norms
 #   - H_NUM_MINIBATCHES=1, D_NUM_MINIBATCHES=1
 #   - Transformer: N_BLOCK, N_EMBD, N_HEAD, HIDDEN_SIZE
+#   - ANNEAL_LR=True (exercises the linear LR schedule code path from n_envs_ppo)
 #
 # Verification targets:
 #   1. init_jit runs (all 5 networks init + env reset)
@@ -57,6 +58,7 @@
 "LAMBDA_INDI": 0.5    # from overcooked_cramped.sh
 
 # Low-level PPO
+"ANNEAL_LR": True
 "L_LR": 5e-4
 "L_UPDATE_EPOCHS": 1       # reduced from 15 for local speed only
 "L_NUM_MINIBATCHES": 1     # matches reference; also required by local batch size
