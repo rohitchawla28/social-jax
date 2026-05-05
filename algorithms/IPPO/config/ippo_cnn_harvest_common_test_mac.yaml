@@ -1,0 +1,56 @@
+# ==================== CONFIG TWEAKING NOTES ===========================
+    # NOTE: match NUM_STEPS w/ num_inner_steps for episode boundary alignment
+    # NOTE: run NUM_UPDATES > 10, bc chunk refactor runs 10 chunks of size max(1, NUM_UPDATES//10)
+    # NOTE: batch_size assertion: NUM_MINIBATCHES * (NUM_ACTORS * NUM_STEPS // NUM_MINIBATCHES) == NUM_ACTORS * NUM_STEPS
+    #       with num_agents=2, NUM_ENVS=4, NUM_STEPS=32, NUM_MINIBATCHES=4 -> 8*32=256, 256/4=64 per minibatch ✓
+
+
+# ====== tiny test (NUM_UPDATES=10, chunk_updates=1)
+"NUM_ENVS": 2
+"NUM_STEPS": 16
+"TOTAL_TIMESTEPS": 320
+"UPDATE_EPOCHS": 1
+"NUM_MINIBATCHES": 2
+
+# ====== small test (NUM_UPDATES=50, chunk_updates=5)  <-- ACTIVE
+# "NUM_ENVS": 4
+# "NUM_STEPS": 32
+# "TOTAL_TIMESTEPS": 6400
+# "UPDATE_EPOCHS": 2
+# "NUM_MINIBATCHES": 4
+
+"LR": 0.0005
+"GAMMA": 0.99
+"GAE_LAMBDA": 0.95
+"CLIP_EPS": 0.2
+"ENT_COEF": 0.01
+"VF_COEF": 0.5
+"MAX_GRAD_NORM": 0.5
+"ACTIVATION": "relu"
+"ENV_NAME": "harvest_common_open"
+"REW_SHAPING_HORIZON": 2.5e6
+"SHAPING_BEGIN": 1e6
+"ENV_KWARGS":
+  "num_agents": 7
+  "num_inner_steps": 32  # NOTE: MATCH TO NUM_STEPS
+  "shared_rewards": False
+  "cnn": True
+  "jit": True
+
+"ANNEAL_LR": True
+"SEED": 30
+"NUM_SEEDS": 1
+"TUNE": False
+
+"EVAL_NUM_EPISODES": 2
+"REWARD": "individual"
+"GIF_NUM_FRAMES": 32
+"PARAMETER_SHARING": True
+
+# WandB Params
+"ENTITY": "rohit-chawla28"
+"PROJECT": "socialjax-ippo"
+"WANDB_MODE": "online"
+"WANDB_GROUP": "IPPO-individual-harvest-common-test"
+"WANDB_TAGS":
+  - INDIVIDUAL_REWARD

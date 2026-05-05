@@ -1381,6 +1381,10 @@ class Harvest_open(MultiAgentEnv):
             # jax.debug.print("new_re_locs111111111 {new_re_locs} 🤯", new_re_locs=new_re_locs)
             state = state.replace(reborn_locs=new_re_locs)
 
+            # this is actual per-agent reward from the env, BEFORE shared/shaping/SVO/etc, used only for logging
+            # different from the actual optimization target
+            raw_reward_individual = jnp.where(apple_matches, 1, jnp.zeros((self.num_agents, 1)))
+
             if self.shared_rewards:
                 rewards = jnp.zeros((self.num_agents, 1))
                 original_rewards = jnp.where(apple_matches, 1, rewards)
@@ -1428,7 +1432,10 @@ class Harvest_open(MultiAgentEnv):
             
             AppleCount = jnp.sum(state.grid == Items.apple)
             info["AppleCount_info"] = jnp.zeros((self.num_agents, 1)).squeeze() + AppleCount
-            
+
+            # this is actual per-agent reward from the env, BEFORE shared/shaping/SVO/etc, used only for logging/fairness metrics
+            # different from the actual optimization target
+            info["raw_reward_individual"] = raw_reward_individual.squeeze()
             
             state_nxt = State(
                 agent_locs=state.agent_locs,
@@ -1450,7 +1457,7 @@ class Harvest_open(MultiAgentEnv):
             state_re = _reset_state(key)
 
             state_re = state_re.replace(outer_t=outer_t + 1)
-            state = jax.tree_map(
+            state = jax.tree_util.tree_map(
                 lambda x, y: jnp.where(reset_inner, x, y),
                 state_re,
                 state_nxt,
