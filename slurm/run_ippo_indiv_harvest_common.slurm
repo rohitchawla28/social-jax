@@ -1,4 +1,4 @@
-!/bin/bash
+#!/bin/bash
 #SBATCH -J ippo_indiv_harvest_common
 #SBATCH -A MLL
 #SBATCH -p gpu-a100
