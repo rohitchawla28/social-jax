@@ -59,6 +59,8 @@ class LowTransition(NamedTuple):
     team_skill_onehot: jnp.ndarray # (NUM_ACTORS, N_Z_TEAM)
     indi_skill_onehot: jnp.ndarray # (NUM_ACTORS, N_Z_INDI)
     env_reward: jnp.ndarray        # (NUM_ENVS, n_agents) — raw env reward, env-major
+    team_intri: jnp.ndarray        # (NUM_ACTORS,) — team intrinsic reward, same value tiled across agents per env
+    indi_intri: jnp.ndarray        # (NUM_ACTORS,) — individual intrinsic reward per actor
     info: dict                     # transposed info, values: (NUM_ACTORS,)
 
 
@@ -352,6 +354,8 @@ def make_train(config):
                 team_skill_onehot=team_skill_onehot_actors,
                 indi_skill_onehot=indi_skill_onehot_actors,
                 env_reward=reward,           # (NUM_ENVS, n_agents)
+                team_intri=team_intri_actors,
+                indi_intri=indi_intri,
                 info=info,
             )
 
@@ -770,6 +774,15 @@ def make_train(config):
         # HMASD-specific rollout metrics
         metric["rollout/combined_reward_mean"] = l_traj.reward.mean()
         metric["rollout/env_reward_mean"] = l_traj.env_reward.mean()
+
+        # Intrinsic reward episode totals.
+        # team_intri is the same value tiled across all agents in an env, so take agent-0
+        # slice to avoid overcounting by n_agents. indi_intri is per-actor so sum over agents.
+        # Shape: l_traj.team_intri / indi_intri = (NUM_STEPS, NUM_ACTORS), agent-major.
+        _intri_team = l_traj.team_intri.reshape(config["NUM_STEPS"], n_agents, NUM_ENVS)
+        _intri_indi  = l_traj.indi_intri.reshape(config["NUM_STEPS"], n_agents, NUM_ENVS)
+        metric["rollout/team_intri_ep_total"] = _intri_team[:, 0, :].sum(axis=0).mean()
+        metric["rollout/indi_intri_ep_total"]  = _intri_indi.sum(axis=(0, 1)).mean()
 
         # Training loss metrics (final epoch / final minibatch of each update)
         # disc_losses: tuple of (D_EPOCH,) arrays for team and indi
