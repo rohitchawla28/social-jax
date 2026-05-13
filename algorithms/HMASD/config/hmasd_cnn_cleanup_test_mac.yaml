@@ -1,0 +1,99 @@
+# Local CPU test config for HMASD cleanup.
+# Designed for M1 MacBook Pro (CPU JAX) to verify the full code path before HPC.
+#
+# Key reductions vs hmasd_cnn_cleanup.yaml:
+#   NUM_ENVS:    32  → 4       (memory)
+#   NUM_STEPS:   1000 → 100    (must stay divisible by SKILL_INTERVAL=25 → SKILL_STEPS=4)
+#   TOTAL_TIMESTEPS: 3e8 → 4e3 (NUM_UPDATES = 4000/100/4 = 10, matches num_evals=10 cleanly)
+#   L_UPDATE_EPOCHS: 2  → 1    (speed; same loop structure, just fewer passes)
+#   H_UPDATE_EPOCHS: 15 → 2    (speed)
+#   D_EPOCH:         15 → 2    (speed)
+#   EVAL_NUM_EPISODES: 10 → 2  (speed)
+#   WANDB_MODE: online → disabled
+#
+# What is NOT changed (kept identical to HPC config):
+#   - SKILL_INTERVAL, N_Z_TEAM, N_Z_INDI, all lambda values
+#   - All learning rates, clip eps, gamma, gae lambda, grad norms
+#   - L_NUM_MINIBATCHES=4, H_NUM_MINIBATCHES=1, D_NUM_MINIBATCHES=1
+#     (100*28=2800 and 100*4=400 are both divisible by 4 — same minibatch structure)
+#   - Transformer: N_BLOCK, N_EMBD, N_HEAD, HIDDEN_SIZE
+#   - Network architecture (activation, CNN filters, all implicit in network defs)
+#
+# Verification targets:
+#   1. init_jit runs (all 5 networks init + env reset)
+#   2. chunk_jit runs (nested scan: 4 outer × 25 inner, transitions correct shapes)
+#   3. All 3 PPO/disc updates complete per chunk without NaN
+#   4. evaluate() runs hierarchical eval (coordinator every 25 steps, GRU resets on done)
+#   5. WandB disabled — check stdout for "Finished training and evals"
+#   6. eval metrics all finite in stdout (add a print if needed)
+
+"ENV_NAME": "clean_up"
+"ENV_KWARGS":
+  "num_agents": 7
+  "num_inner_steps": 1000
+  "shared_rewards": True
+  "cnn": True
+  "jit": True
+
+"TOTAL_TIMESTEPS": 4e3
+"NUM_ENVS": 4
+"NUM_STEPS": 100           # SKILL_STEPS = 100/25 = 4
+"SKILL_INTERVAL": 25
+"SEED": 30
+"NUM_SEEDS": 1
+"ACTIVATION": "relu"
+"GIF_NUM_FRAMES": 50
+"EVAL_NUM_EPISODES": 2
+
+# Skill dimensions (unchanged)
+"N_Z_TEAM": 3
+"N_Z_INDI": 3
+
+# Intrinsic reward coefficients (unchanged)
+"LAMBDA_ENV": 100
+"LAMBDA_TEAM": 0.1
+"LAMBDA_INDI": 0.1
+
+# Low-level PPO
+"L_LR": 5e-4
+"L_UPDATE_EPOCHS": 1       # reduced from 2
+"L_NUM_MINIBATCHES": 4     # unchanged — 100*28=2800 and 100*4=400 both divisible by 4
+"L_GAMMA": 0.99
+"L_GAE_LAMBDA": 0.95
+"L_CLIP_EPS": 0.2
+"L_ENT_COEF": 0.01
+"L_VF_COEF": 0.5
+"L_MAX_GRAD_NORM": 0.5
+
+# High-level PPO (transformer)
+"H_LR": 5e-4
+"H_UPDATE_EPOCHS": 2       # reduced from 15
+"H_NUM_MINIBATCHES": 1
+"H_GAMMA": 0.99
+"H_GAE_LAMBDA": 0.95
+"H_CLIP_EPS": 0.2
+"H_ENT_COEF": 0.01
+"H_VF_COEF": 1.0
+"H_MAX_GRAD_NORM": 10.0
+
+# Transformer (unchanged)
+"N_BLOCK": 1
+"N_EMBD": 64
+"N_HEAD": 1
+"HIDDEN_SIZE": 64
+
+# Discriminator
+"D_TEAM_LR": 5e-4
+"D_INDI_LR": 5e-4
+"D_EPOCH": 2               # reduced from 15
+"D_NUM_MINIBATCHES": 1
+"D_MAX_GRAD_NORM": 10.0
+
+# WandB
+"ENTITY": "rohit-chawla28"
+"PROJECT": "socialjax-ippo"
+"WANDB_GROUP": "HMASD-cleanup-test-mac"
+"WANDB_MODE": "disabled"
+"WANDB_TAGS":
+  - HMASD
+  - COMMON_REWARD
