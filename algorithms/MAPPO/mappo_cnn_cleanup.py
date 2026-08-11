@@ -442,6 +442,7 @@ def make_train(config):
                 loss_info = {
                     "train/total_loss": total_loss,
                     "train/actor_loss": actor_loss[0],
+                    # TODO: shouldn't this be called critic_loss instead of value_loss?
                     "train/value_loss": critic_loss[0],
                     "train/value_mean": critic_loss[1][1],
                     "train/actor_grad_norm": actor_grad_norm,

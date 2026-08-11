@@ -266,6 +266,7 @@ def make_train(config):
             rng, _rng = jax.random.split(rng)
             # obs_batch = jnp.stack([last_obs[a] for a in env.agents]).reshape(-1, *env.observation_space().shape)
             if config["PARAMETER_SHARING"]:
+                # change from env-major to agent-major AND flatten to shape=(NUM_ACTORS, H, W, C)
                 obs_batch = jnp.transpose(last_obs,(1,0,2,3,4)).reshape(-1, *(env.observation_space()[0]).shape)
                 # print("input_obs_shape", obs_batch.shape)
                 pi, value = network.apply(train_state.params, obs_batch)

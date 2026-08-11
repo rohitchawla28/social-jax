@@ -1,0 +1,55 @@
+# Phase 2 config: CTME coordinator training on cleanup with frozen skills.
+
+"PHASE": "coordination"
+"ENV_NAME": "clean_up"
+"ENV_KWARGS":
+  "num_agents": 7
+  "num_inner_steps": 1000
+  "shared_rewards": True
+  "cnn": True
+  "jit": True
+
+"TOTAL_TIMESTEPS": 3e8
+"NUM_ENVS": 32
+"NUM_STEPS": 1000
+"SKILL_INTERVAL": 25
+"SEED": 30
+"NUM_SEEDS": 1
+"ACTIVATION": "relu"
+"GIF_NUM_FRAMES": 250
+"EVAL_NUM_EPISODES": 10
+
+# Skill library learned in phase 1
+"N_Z": 3
+"SKILL_ACTOR_CKPT": null
+"FREEZE_SKILL_ACTOR": True
+"LOW_LEVEL_DETERMINISTIC": False
+
+# Coordinator reward
+"COORDINATOR_REWARD_SOURCE": "team_env_reward"
+"COORDINATOR_REWARD_SCALE": 1.0
+
+# High-level Coordinator PPO
+"H_LR": 5e-4
+"H_UPDATE_EPOCHS": 15
+"H_NUM_MINIBATCHES": 1
+"H_GAMMA": 0.99
+"H_GAE_LAMBDA": 0.95
+"H_CLIP_EPS": 0.2
+"H_ENT_COEF": 0.01
+"H_VF_COEF": 1.0
+"H_MAX_GRAD_NORM": 10.0
+
+# Checkpointing
+"CHECKPOINT_DIR": "checkpoints/ctme/cleanup/coordination"
+"SAVE_INTERVAL_UPDATES": 50
+
+# WandB
+"ENTITY": "rohit-chawla28"
+"PROJECT": "socialjax-ctme"
+"WANDB_GROUP": "ctme-cleanup-coordination"
+"WANDB_MODE": "online"
+"WANDB_TAGS":
+  - CTME
+  - coordination
+  - cleanup

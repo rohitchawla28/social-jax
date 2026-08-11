@@ -1,0 +1,64 @@
+# Mini phase 1 config for smoke-testing CTME skill discovery on cleanup.
+
+"PHASE": "skill_discovery"
+"ENV_NAME": "clean_up"
+"ENV_KWARGS":
+  "num_agents": 7
+  "num_inner_steps": 40
+  "shared_rewards": True
+  "cnn": True
+  "jit": True
+
+"TOTAL_TIMESTEPS": 400
+"NUM_ENVS": 2
+"NUM_STEPS": 40
+"SKILL_INTERVAL": 4
+"SEED": 30
+"ACTIVATION": "relu"
+"NUM_EVALS": 10
+"EVAL_NUM_EPISODES": 2
+
+# Skill dimensions
+"N_Z": 3
+
+# Intrinsic reward coefficients
+"LAMBDA_ENV": 0
+"LAMBDA_SKILL": 0.5
+
+# Low-level PPO (SkillActor / SkillCritic)
+"ANNEAL_LR": False
+"SKILL_ACTOR_LR": 5e-4
+"SKILL_CRITIC_LR": 5e-4
+"L_UPDATE_EPOCHS": 1
+"L_NUM_MINIBATCHES": 1
+"L_GAMMA": 0.99
+"L_GAE_LAMBDA": 0.95
+"L_CLIP_EPS": 0.2
+"L_ENT_COEF": 0.01
+"L_VF_COEF": 1.0
+"SKILL_ACTOR_MAX_GRAD_NORM": 10.0
+"SKILL_CRITIC_MAX_GRAD_NORM": 10.0
+
+# Discriminator
+"D_LR": 5e-4
+"D_UPDATE_EPOCHS": 2
+"D_NUM_MINIBATCHES": 1
+"D_MAX_GRAD_NORM": 10.0
+
+# Checkpointing (not used right now)
+"CHECKPOINT_DIR": "checkpoints/ctme/cleanup/skill_discovery_mini"
+"SAVE_INTERVAL_UPDATES": 1
+"SAVE_SKILL_ACTOR": True
+"SAVE_SKILL_CRITIC": True
+"SAVE_DISCRIMINATOR": True
+
+# WandB
+"ENTITY": "rohit-chawla28"
+"PROJECT": "socialjax-ctme"
+"WANDB_GROUP": "ctme-cleanup-skill-discovery-mini"
+"WANDB_MODE": "online"
+"WANDB_TAGS":
+  - CTME
+  - skill_discovery
+  - cleanup
+  - mini
